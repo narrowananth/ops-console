@@ -1,5 +1,6 @@
 import type { PrCommit, PullRequestDetail } from '@ops-console/shared';
 import { useState } from 'react';
+import { Dropdown } from '../components/ui/dropdown';
 import { usePostComment } from '../lib/queries';
 import { ago } from '../monitor/scan-scope';
 import { Avatar } from './pr-meta';
@@ -12,6 +13,9 @@ enum Filter {
   Resolved = 'resolved',
   Agent = 'agent',
 }
+
+/** The filter the Activity opens on: what still needs an answer. */
+const DEFAULT_FILTER = Filter.Open;
 
 const FILTER_LABEL: Record<Filter, string> = {
   [Filter.All]: 'All activity',
@@ -75,7 +79,7 @@ function Event({ entry }: { entry: Exclude<Entry, { kind: 'thread' }> }) {
 /** The pull request's Activity: events and comment threads in time order under a divider per day, and a box to comment. */
 export function PrActivity({ pr }: { pr: PullRequestDetail }) {
   const comment = usePostComment(pr.repo_id, pr.number);
-  const [filter, setFilter] = useState(Filter.All);
+  const [filter, setFilter] = useState(DEFAULT_FILTER);
   const threads = threadsOf(pr);
   const open = threads.filter((thread) => !thread.root.resolved).length;
   const entries = entriesOf(pr, filter);
@@ -88,18 +92,16 @@ export function PrActivity({ pr }: { pr: PullRequestDetail }) {
         <span className="rounded-full bg-ok/15 px-2 py-px text-xs font-semibold text-ok">
           {threads.length - open} resolved
         </span>
-        <select
-          aria-label="Filter the activity"
+        <Dropdown
+          label="Filter the activity"
+          compact
+          className="ml-auto w-40"
+          listClassName="w-48"
           value={filter}
-          onChange={(event) => setFilter(event.target.value as Filter)}
-          className="ml-auto cursor-pointer rounded-md border border-divider bg-card px-2.5 py-1 text-xs text-text"
-        >
-          {Object.values(Filter).map((value) => (
-            <option key={value} value={value}>
-              {FILTER_LABEL[value]}
-            </option>
-          ))}
-        </select>
+          defaultValue={DEFAULT_FILTER}
+          options={Object.values(Filter).map((value) => ({ value, label: FILTER_LABEL[value] }))}
+          onChange={setFilter}
+        />
       </div>
       <CommentComposer
         label="Comment on the pull request"

@@ -146,12 +146,18 @@ async function routePullRequest(
   return posted;
 }
 
-const openPullRequest = (page: Page) => page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
+const openPullRequest = (page: Page) => page.goto(`${daemon.url}/pull-requests?pr=r1/7#token=${daemon.token}`);
 
 const thread = (page: Page, text: string) =>
   page.getByRole('region', { name: 'Activity' }).getByRole('listitem').filter({ hasText: text });
 
 const ACTIONS = '/api/repos/r1/pull-requests/7/action-sessions';
+
+const filterButton = (page: Page) => page.getByRole('button', { name: 'Filter the activity' });
+const filterBy = async (page: Page, label: string) => {
+  await filterButton(page).click();
+  await page.getByRole('option', { name: label }).click();
+};
 
 test('Check replies sits at the top and opens a Session over every replied thread', async ({ page }) => {
   const detail = { current: pullRequest() };
@@ -547,12 +553,14 @@ test('Activity shows a thread as one card: state, place, the code, the comments,
   await expect(thread(page, 'Nice work overall.')).toContainText('General comment');
 
   // A resolved thread starts folded to its header; a click opens it, and the choice stays through a reload.
+  await filterBy(page, 'Resolved threads');
   const resolved = thread(page, 'src/tax.ts · line 4');
   await expect(resolved).toContainText('resolved');
   await expect(resolved.getByText('Round the tax.')).toBeHidden();
   await resolved.getByRole('button', { name: /resolved/ }).click();
   await expect(resolved.getByText('Round the tax.')).toBeVisible();
   await page.reload();
+  await filterBy(page, 'Resolved threads');
   await expect(thread(page, 'src/tax.ts · line 4').getByText('Round the tax.')).toBeVisible();
 });
 
@@ -562,16 +570,17 @@ test('the Activity filter narrows to open threads, resolved threads or the agent
   await routePullRequest(page, { current: pullRequest({ files: [CART, TAX] }) });
   await openPullRequest(page);
   const list = page.getByRole('region', { name: 'Activity' }).getByRole('listitem');
-  const filter = page.getByRole('combobox', { name: 'Filter the activity' });
-
-  await expect(list).toHaveCount(5);
-  await filter.selectOption({ label: 'Open threads' });
+  // The filter is the console's own dropdown, never the system's, and opens on Open threads.
+  await expect(page.getByRole('combobox', { name: 'Filter the activity' })).toHaveCount(0);
+  await expect(filterButton(page)).toHaveText('Open threads');
   await expect(list).toHaveCount(4);
-  await filter.selectOption({ label: 'Resolved threads' });
+  await filterBy(page, 'All activity');
+  await expect(list).toHaveCount(5);
+  await filterBy(page, 'Resolved threads');
   await expect(list).toHaveCount(1);
   await expect(list).toContainText('src/tax.ts · line 4');
   // The agent answered c3 and started c5.
-  await filter.selectOption({ label: 'Agent only' });
+  await filterBy(page, 'Agent only');
   await expect(list).toHaveCount(2);
   await expect(list.first()).toContainText('Name this rate.');
   await expect(list.last()).toContainText('Cache the rate lookup.');
@@ -593,6 +602,7 @@ test('a thread’s Check reply and Address comment start a Round for that thread
   await expect(thread(page, 'Name this rate.').getByRole('button', { name: /Check reply/ })).toHaveCount(0);
   await expect(thread(page, 'Nice work overall.').getByRole('button', { name: /Check reply/ })).toHaveCount(0);
   await expect(thread(page, 'Name this rate.').getByRole('button', { name: /Address comment/ })).toBeVisible();
+  await filterBy(page, 'Resolved threads');
   await thread(page, 'src/tax.ts · line 4')
     .getByRole('button', { name: /resolved/ })
     .click();
@@ -600,6 +610,7 @@ test('a thread’s Check reply and Address comment start a Round for that thread
   await expect(
     thread(page, 'src/tax.ts · line 4').getByRole('button', { name: /Address comment|Check reply/ }),
   ).toHaveCount(0);
+  await filterBy(page, 'Open threads');
 
   await thread(page, 'Guard the empty cart.')
     .getByRole('button', { name: /Check reply/ })
@@ -748,4 +759,90 @@ test('a thread in the diff has the same actions as in Activity', async ({ page }
   await expect(inDiff.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
   await inDiff.getByRole('button', { name: /Check reply/ }).click();
   await expect.poll(() => posted).toEqual([{ path: ACTIONS, body: { action: 'check_replies', comment_ids: ['c1'] } }]);
+});
+
+test('the Activity filter lists its choices, marks Open threads as the default and opens on it each time', async ({
+  page,
+}) => {
+  await routePullRequest(page, { current: pullRequest() });
+  await openPullRequest(page);
+  await filterBy(page, 'All activity');
+  await expect(filterButton(page)).toHaveText('All activity');
+
+  await filterButton(page).click();
+  const options = page.getByRole('listbox', { name: 'Filter the activity' }).getByRole('option');
+  await expect(options).toHaveText([/All activity/, /Open threads\s*default/, /Resolved threads/, /Agent only/]);
+  await expect(options.nth(0)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Escape');
+
+  // The choice is not kept: a reload opens on Open threads again.
+  await page.reload();
+  await expect(filterButton(page)).toHaveText('Open threads');
+});
+
+test('the Overview panel keeps room on its right edge, so its scrollbar never draws over the comments', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 500 });
+  const many = Array.from({ length: 12 }, (_, at) =>
+    comment(`m${at}`, { body: `Filler comment ${at}`, line: at + 1, created_at: NOW }),
+  );
+  await routePullRequest(page, { current: pullRequest({ comments: many }) });
+  await openPullRequest(page);
+  const panel = page.getByRole('tabpanel');
+  const box = page.getByRole('textbox', { name: 'Comment on the pull request' });
+  await expect(box).toBeVisible();
+  // The panel scrolls, and what it holds ends well short of its right edge, where the scrollbar sits.
+  expect(await panel.evaluate((node) => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0);
+  const outer = await panel.boundingBox();
+  const right = (outer?.x ?? 0) + (outer?.width ?? 0);
+  for (const target of [box, filterButton(page), panel.locator('[data-thread]').first()]) {
+    const inner = await target.boundingBox();
+    expect((inner?.x ?? 0) + (inner?.width ?? 0)).toBeLessThanOrEqual(right - 24);
+  }
+});
+
+test('a comment of yours has a three-dot menu that deletes it after a confirmation; others’ comments have none', async ({
+  page,
+}) => {
+  await routePullRequest(page, { current: pullRequest() });
+  const deleted: string[] = [];
+  await page.route('**/api/repos/r1/pull-requests/7/comments/*', (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    deleted.push(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+    return route.fulfill({ status: 204, body: '' });
+  });
+  await openPullRequest(page);
+
+  // c1 is the reviewer's with the operator's reply c1r: one button, on the reply; the thread has no menu of its own.
+  const card = thread(page, 'Guard the empty cart.');
+  await expect(page.getByRole('button', { name: 'More for this thread' })).toHaveCount(0);
+  const menus = card.getByRole('button', { name: 'More for this comment' });
+  await expect(menus).toHaveCount(1);
+  // Big enough to click.
+  const size = await menus.boundingBox();
+  expect(size?.width).toBeGreaterThanOrEqual(28);
+  expect(size?.height).toBeGreaterThanOrEqual(28);
+  // The operator's thread c5 has one too; a reviewer's comment alone has none.
+  await expect(
+    thread(page, 'Cache the rate lookup.').getByRole('button', { name: 'More for this comment' }),
+  ).toHaveCount(1);
+  await expect(thread(page, 'Nice work overall.').getByRole('button', { name: 'More for this comment' })).toHaveCount(
+    0,
+  );
+
+  // It asks first; Cancel sends nothing.
+  const dialog = page.getByRole('alertdialog', { name: 'Delete this comment?' });
+  await menus.click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(deleted).toEqual([]);
+
+  await menus.click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => deleted).toEqual(['c1r']);
+  await expect(dialog).toHaveCount(0);
 });

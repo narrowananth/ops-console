@@ -1,6 +1,7 @@
 # Sign and notarize the release
 
 **Status:** draft, on hold until an Apple Developer Program membership exists (see Blocker). Nothing in it is built: releases are ad hoc signed.
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Permissions page. Full Disk Access, Start at login and the Run sandbox status are on Accounts & Usage.
 **Design:** none. Permissions page: no change. Follows no design screen.
 
 ## Problem

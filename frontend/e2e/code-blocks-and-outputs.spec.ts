@@ -91,7 +91,7 @@ async function openSession(page: Page, outputs: object[]) {
   await page.route('**/api/sessions/s1/diff', (route) =>
     route.fulfill({ json: { data: { branch: 'main', base: 'origin/main', additions: 0, deletions: 0, files: [] } } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 }
 
 test('a code block has a copy icon that copies the whole block and shows a check', async ({ page }) => {

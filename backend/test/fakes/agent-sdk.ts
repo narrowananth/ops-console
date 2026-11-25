@@ -31,6 +31,8 @@ export type Step =
       classifierAsks?: boolean;
       /** Holds the call open, between its `PreToolUse` and its result, until the promise settles. */
       hold?: Promise<unknown>;
+      /** The subagent making the call, as the permission callback's `agentID` says; none means the main agent. */
+      agent?: string;
     }
   /** What the run's final `result` message reports as its cost. */
   | { cost: { usd: number; tokens: number } }
@@ -354,7 +356,16 @@ export class FakeAgentSdk implements AgentSdk {
           await result(message, true);
         };
 
-        const pre = await hooks('PreToolUse', { tool_name: step.tool, tool_input: step.input, tool_use_id: id }, id);
+        const pre = await hooks(
+          'PreToolUse',
+          {
+            tool_name: step.tool,
+            tool_input: step.input,
+            tool_use_id: id,
+            ...(step.agent ? { agent_id: step.agent } : {}),
+          },
+          id,
+        );
         const decisions = pre.flatMap((output) =>
           'hookSpecificOutput' in output && output.hookSpecificOutput?.hookEventName === 'PreToolUse'
             ? [output.hookSpecificOutput]
@@ -377,6 +388,7 @@ export class FakeAgentSdk implements AgentSdk {
               options.canUseTool?.(step.tool, input, {
                 signal: new AbortController().signal,
                 toolUseID: id,
+                ...(step.agent ? { agentID: step.agent } : {}),
                 requestId: crypto.randomUUID(),
               }),
             ),

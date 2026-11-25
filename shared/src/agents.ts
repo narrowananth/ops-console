@@ -248,6 +248,8 @@ export const subagentSchema = z.object({
   description: z.string(),
   /** The subagent type, such as `Explore`. */
   type: z.string().nullable(),
+  /** The model of its first message; null until it has spoken, and for a subagent kept before models were. */
+  model: z.string().nullable().default(null),
   status: z.enum(SubagentStatus),
   started_at: z.string(),
   finished_at: z.string().nullable(),
@@ -670,6 +672,8 @@ export const approvalSchema = z.object({
   target: z.string().nullable(),
   command: z.string().nullable(),
   is_prod: z.boolean(),
+  /** The subagent whose tool call asked; null when the main agent did. */
+  subagent_id: z.string().nullable(),
   /** The integration CLI a yes may also cover for the rest of the Session; null when the Approval offers no such choice. */
   trust_cli: z.string().nullable(),
 });

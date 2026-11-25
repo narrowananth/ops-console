@@ -1,6 +1,7 @@
 # Google Workspace Connectors
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) replaces the Setup agent: an Anonymous Session's agent starts a Google Connect, with an Approval.
 **Design:** the Integrations page's Connector pane in `design/ops-console.html`, unchanged: one sign-in step.
 
 ## Problem

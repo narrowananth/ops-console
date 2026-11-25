@@ -34,6 +34,8 @@ export const wsEventSchema = z.discriminatedUnion('event', [
   event('settings.updated', z.object({ keys: z.array(z.string()) })),
   event('update.changed', z.object({ status: z.enum(UpdateStatus) })),
   event('keychain.wait_changed', keychainWaitSchema),
+  event('secret.requested', z.object({ session_id: z.string(), request_id: z.string(), label: z.string() })),
+  event('secret.settled', z.object({ session_id: z.string(), request_id: z.string() })),
   event('keychain.handover_refused', z.object({ refused: z.literal(true), reason: z.string() })),
   event(
     'session.output',

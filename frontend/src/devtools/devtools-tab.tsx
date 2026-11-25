@@ -216,7 +216,7 @@ export function DevToolsTab() {
       <HealthStrip area={HealthArea.Connections} />
       <HealthBanner area={HealthArea.Connections} />
       {data.length === 0 ? (
-        <Empty>No connections yet. Ask the Setup agent, or pick a type.</Empty>
+        <Empty>No connections yet. Ask in an Anonymous Session, or pick a type.</Empty>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-1.5">
           {ascending(data, (connection) => connection.name).map((connection) => (

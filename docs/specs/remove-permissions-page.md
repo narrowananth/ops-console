@@ -1,6 +1,7 @@
 # Remove the Permissions page
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent tab that held the two status lines; they are on Accounts & Usage, in the `On this machine` section.
 **Design:** none. A page goes; two status lines move into the Setup agent tab.
 
 ## Problem

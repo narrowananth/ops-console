@@ -32,6 +32,7 @@ import { ascending } from '../lib/sort';
 import { AccountSwitch, AllDisabledBanner, allDisabled, successorOf } from './account-switch';
 import { AccountUsageView } from './account-usage-view';
 import { CliProxyHub } from './cliproxy-hub';
+import { MachineSection } from './machine-section';
 import { ACCESS_MODES, EFFORTS, MODELS } from './options';
 import { SignInLinkDialog } from './sign-in-link-dialog';
 import { ago, UsageBar } from './usage-bar';
@@ -619,7 +620,7 @@ function AccountsPane() {
           </Paused>
           <Section
             title="Defaults for new sessions"
-            sub="Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, Agent Review, and the Setup agent. Change them for one session from its Model, Effort and Access chips."
+            sub="Every agent the console starts begins with these: Workspace and Dev tools terminals, Monitor Verify and Fix, and Agent Review. Change them for one session from its Model, Effort and Access chips."
           >
             <div className="divide-y divide-line">
               {DEFAULTS.map((row) => (
@@ -658,6 +659,7 @@ function AccountsPane() {
         </>
       )}
       <NotificationsSection />
+      <MachineSection />
     </div>
   );
 }

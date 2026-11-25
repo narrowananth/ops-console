@@ -28,7 +28,7 @@ describe('Session creation', () => {
       state: 'idle',
       model: 'claude-sonnet-5-5',
       effort: 'high',
-      access_mode: 'supervised',
+      access_mode: AccessMode.Supervised,
       account_id: null,
     });
 
@@ -660,6 +660,53 @@ describe('the Running tray', () => {
     hold.open();
     await stateOf(daemon, id, 'idle');
     expect(await tray(daemon)).toEqual([]);
+  });
+
+  it('gives each subagent the model of its first message, and none before it has spoken', async () => {
+    const daemon = await start();
+    const id = daemon.createSession();
+    const hold = gate();
+    daemon.sdk.script(
+      { task: { id: 't1', description: 'Search the repo' } },
+      { task: { id: 't2', description: 'Read the router' } },
+      { usage: { id: 'm1', task: 't1', model: 'claude-haiku-5-5', input: 10, output: 5 } },
+      { usage: { id: 'm2', task: 't1', model: 'claude-sonnet-5-5', input: 10, output: 5 } },
+      { wait: hold.promise },
+    );
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'look around' });
+    const subagents = await until(
+      async () => (await api(daemon).get(`/sessions/${id}`)).body.data.subagents,
+      (list) => list.find((one: { id: string }) => one.id === 't1')?.model !== null && list.length === 2,
+      'the first subagent has a model',
+    );
+    expect(subagents).toEqual([
+      expect.objectContaining({ id: 't1', model: 'claude-haiku-5-5' }),
+      expect.objectContaining({ id: 't2', model: null }),
+    ]);
+    hold.open();
+    await stateOf(daemon, id, 'idle');
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.subagents[0].model).toBe('claude-haiku-5-5');
+  });
+
+  it('records which subagent an Approval was asked for, and none for the main agent', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Supervised });
+    daemon.sdk.script(
+      { task: { id: 't1', description: 'Run the tests' } },
+      { tool: 'Bash', input: { command: 'pnpm test' }, agent: 't1' },
+      { tool: 'Bash', input: { command: 'pnpm lint' } },
+    );
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    for (const command of ['pnpm test', 'pnpm lint']) {
+      const [pending] = await until(
+        async () => (await api(daemon).get('/approvals?status=pending')).body.data,
+        (list) => list.length === 1 && list[0].summary.includes(command),
+        `the Approval for ${command}`,
+      );
+      expect(pending.subagent_id).toBe(command === 'pnpm test' ? 't1' : null);
+      await api(daemon).post(`/approvals/${pending.id}/decision`, { decision: 'approved' });
+    }
+    await stateOf(daemon, id, 'idle');
   });
 
   it('keeps a stopped run, ends its subagents with it, and lets Play and Dismiss follow', async () => {

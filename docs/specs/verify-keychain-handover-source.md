@@ -1,6 +1,7 @@
 # Verify Keychain Handover Source
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) moves the Keychain row's Handover refusal from the Permissions page to Accounts & Usage.
 **Design:** none. Permissions page: the Keychain row gains a Handover refusal state. Follows no design screen.
 
 ## Problem

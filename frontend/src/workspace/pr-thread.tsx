@@ -1,7 +1,9 @@
 import { PrAction, type PrComment, type PullRequestDetail } from '@ops-console/shared';
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import { z } from 'zod';
+import { MenuButton, MenuItem } from '../browser/menu-button';
 import { Button, Spinner } from '../components/ui/button';
+import { ConfirmDialog } from '../components/ui/confirm-dialog';
 import { Markdown } from '../components/ui/markdown';
 import { useDeleteComment, usePostComment, useResolveComment } from '../lib/queries';
 import { useStored } from '../lib/remember';
@@ -93,97 +95,31 @@ export const ThreadActionsContext = createContext<ThreadActions | null>(null);
 
 export const SESSION_BUSY = 'The Session is working on this pull request';
 
-/** ⋯ on a thread: Delete for each comment the operator or the agent wrote, then a second click to confirm, since the host keeps no copy. */
-function ThreadMenu({
-  mine,
-  onDelete,
-  pendingId,
-}: {
-  mine: PrComment[];
-  onDelete: (comment: PrComment) => void;
-  pendingId: string | null;
-}) {
-  const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState<PrComment | null>(null);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !box.current?.contains(event.target as Node)) {
-        setOpen(false);
-        setConfirming(null);
-      }
-    };
-    window.addEventListener('mousedown', close);
-    window.addEventListener('keydown', close);
-    return () => {
-      window.removeEventListener('mousedown', close);
-      window.removeEventListener('keydown', close);
-    };
-  }, [open]);
+/** A comment of yours: the three-dot button with Delete, which asks first, since the host keeps no copy. */
+function CommentMenu({ onDelete }: { onDelete: () => void }) {
   return (
-    <div ref={box} className="relative flex-none">
-      <button
-        type="button"
-        aria-label="More for this thread"
-        title="Delete one of your comments on the Git host"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen(!open);
-          setConfirming(null);
-        }}
-        className={`flex size-6.5 cursor-pointer items-center justify-center rounded-md border text-sm leading-none ${open ? 'border-accent-400 bg-accent-100 text-text' : 'border-divider bg-card text-neutral-700 hover:text-text'}`}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 bottom-full z-20 mb-1 w-60 overflow-hidden rounded-lg border border-divider bg-card py-1 font-body shadow-lg"
+    <MenuButton
+      icon
+      label="More for this comment"
+      width="w-40"
+      className="ml-auto"
+      menuChildren={(close) => (
+        <MenuItem
+          onClick={() => {
+            close();
+            onDelete();
+          }}
         >
-          {confirming ? (
-            <div className="flex flex-col gap-2 px-3 py-2">
-              <span className="text-xs text-neutral-700">
-                Delete this comment from the pull request? It cannot be undone.
-              </span>
-              <span className="flex gap-1.5">
-                <Button
-                  variant="primary"
-                  className="px-2.5 py-1 text-xs"
-                  disabled={pendingId !== null}
-                  onClick={() => onDelete(confirming)}
-                >
-                  {pendingId === confirming.id && <Spinner />}
-                  Delete
-                </Button>
-                <Button
-                  className="px-2.5 py-1 text-xs"
-                  disabled={pendingId !== null}
-                  onClick={() => setConfirming(null)}
-                >
-                  Cancel
-                </Button>
-              </span>
-            </div>
-          ) : mine.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-neutral-700">You wrote no comment in this thread.</div>
-          ) : (
-            mine.map((comment) => (
-              <button
-                key={comment.id}
-                type="button"
-                role="menuitem"
-                onClick={() => setConfirming(comment)}
-                className="block w-full cursor-pointer border-0 bg-transparent px-3 py-1.5 text-left font-body text-[13px] text-accent-700 hover:bg-neutral-200"
-              >
-                Delete your comment from {ago(comment.created_at)}
-              </button>
-            ))
-          )}
-        </div>
+          Delete
+        </MenuItem>
       )}
-    </div>
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden fill="currentColor">
+        <circle cx="3" cy="8" r="1.4" />
+        <circle cx="8" cy="8" r="1.4" />
+        <circle cx="13" cy="8" r="1.4" />
+      </svg>
+    </MenuButton>
   );
 }
 
@@ -221,7 +157,7 @@ function ThreadCode({ hunk }: { hunk: string }) {
 
 /**
  * One comment thread as a card: its state and place, the code it is on, its comments, and Resolve, Reply, the agent's
- * Check reply and Address comment, and ⋯ to delete your own. The header folds it; a resolved thread starts folded.
+ * Check reply and Address comment; each comment of yours has a three-dot menu to delete it. The header folds it; a resolved thread starts folded.
  */
 export function Thread({
   pr,
@@ -250,7 +186,7 @@ export function Thread({
   const comments = [root, ...replies];
   const inline = root.file_path !== null;
   const outdated = isOutdated(pr.files, root);
-  const error = resolve.error ?? remove.error;
+  const [deleting, setDeleting] = useState<PrComment | null>(null);
   const place =
     root.file_path === null ? 'General comment' : `${root.file_path}${root.line ? ` · line ${root.line}` : ''}`;
   const check = canCheck({ root, replies });
@@ -292,7 +228,7 @@ export function Thread({
             <div key={comment.id} className="flex gap-2.5 border-b border-line px-3 py-2.5 text-[13px]">
               <Avatar name={comment.author} size="sm" />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2 text-xs">
+                <div className="-my-1 flex items-center gap-2 text-xs">
                   <strong>{comment.author}</strong>
                   {comment.by_agent && (
                     <span
@@ -305,6 +241,14 @@ export function Thread({
                   <span title={new Date(comment.created_at).toLocaleString()} className="text-neutral-600">
                     {ago(comment.created_at)}
                   </span>
+                  {comment.is_mine && (
+                    <CommentMenu
+                      onDelete={() => {
+                        remove.reset();
+                        setDeleting(comment);
+                      }}
+                    />
+                  )}
                 </div>
                 <Markdown source={comment.body} className="mt-1" />
               </div>
@@ -389,20 +333,25 @@ export function Thread({
                 </Button>
               </>
             )}
-            <span className="ml-auto">
-              <ThreadMenu
-                mine={comments.filter((comment) => comment.is_mine)}
-                pendingId={remove.isPending ? (remove.variables ?? null) : null}
-                onDelete={(comment) => remove.mutate(comment.id)}
-              />
-            </span>
           </div>
-          {error && (
+          {resolve.error && (
             <div role="alert" className="px-3 pb-2 text-xs text-accent-700">
-              {error.message}
+              {resolve.error.message}
             </div>
           )}
         </>
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="Delete this comment?"
+          action="Delete"
+          pending={remove.isPending}
+          error={remove.error?.message}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => remove.mutate(deleting.id, { onSuccess: () => setDeleting(null) })}
+        >
+          It is removed from the pull request on the host and cannot be undone.
+        </ConfirmDialog>
       )}
     </div>
   );

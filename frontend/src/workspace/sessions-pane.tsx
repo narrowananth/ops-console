@@ -1,9 +1,9 @@
-import { type Repo, type Session, SessionKind, SessionState } from '@ops-console/shared';
+import { type Repo, type Session, SessionKind, SessionState, SubagentStatus } from '@ops-console/shared';
 import { type ReactNode, useState } from 'react';
 import { z } from 'zod';
 import { MODEL_NAME } from '../agent-runs/run-look';
 import { StopIcon } from '../agents/stop-run';
-import { Button } from '../components/ui/button';
+import { Button, Spinner } from '../components/ui/button';
 import { Dropdown } from '../components/ui/dropdown';
 import { useNow } from '../components/ui/elapsed';
 import { Empty } from '../components/ui/empty';
@@ -18,11 +18,12 @@ import {
   useRepos,
   useStopSession,
 } from '../lib/queries';
-import { useStored } from '../lib/remember';
+import { useStored, useStoredValue } from '../lib/remember';
 import { ascending } from '../lib/sort';
 import { ago } from '../monitor/scan-scope';
+import { sessionDraftKey } from './links';
 import { FilterTabs, ListGroup, SearchField, useFolded } from './list-parts';
-import { HoverCard, PULL_COLOUR, SessionCard, useSessionPulls } from './session-hover-card';
+import { HoverCard, PULL_COLOUR, PullLines, SessionCard, useSessionPulls } from './session-hover-card';
 
 /** Idle Sessions listed before "Show N more". A search, or the open Session, lifts the limit. */
 const IDLE_SHOWN = 8;
@@ -251,18 +252,24 @@ function RepoBadge({ repo }: { repo: Repo | null }) {
   );
 }
 
-/** Whole minutes up to an hour, then hours and minutes: `36m`, `1h 05m`. */
-const minutes = (ms: number) => {
-  const total = Math.max(0, Math.floor(ms / 60_000));
+/** Seconds under a minute, then whole minutes, then hours and minutes: `42s`, `36m`, `1h 05m`. */
+const elapsed = (ms: number) => {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const total = Math.floor(seconds / 60);
   return total < 60 ? `${total}m` : `${Math.floor(total / 60)}h ${String(total % 60).padStart(2, '0')}m`;
 };
 
-/** "Working 36m": the run's time since it started, to the minute. Without a start it says "Working". */
-function WorkingChip({ since }: { since: string | null }) {
-  const now = useNow(since !== null, 15_000);
+/** A run in progress on a row: a spinner, the word and the time since it started. Without a start it is the word alone. */
+function RunChip({ since, waiting }: { since: string | null; waiting: boolean }) {
+  const now = useNow(since !== null);
   return (
-    <span className="flex-none rounded-sm bg-ok/15 px-1.25 text-[11px] leading-4 font-medium text-ok">
-      Working{since ? ` ${minutes(now - Date.parse(since))}` : ''}
+    <span
+      className={`flex flex-none items-center gap-1 rounded-sm px-1.25 text-[11px] leading-4 font-medium ${waiting ? 'bg-neutral-200 text-neutral-700' : 'bg-info/14 text-info'}`}
+    >
+      <Spinner />
+      {waiting ? 'Waiting' : 'Working'}
+      {since ? ` ${elapsed(now - Date.parse(since))}` : ''}
     </span>
   );
 }
@@ -273,11 +280,27 @@ function PullRequestChip({ session }: { session: Session }) {
   const newest = pulls[0];
   if (!newest) return null;
   return (
-    <span className="flex flex-none items-center gap-0.5">
-      <span aria-hidden className={`size-3.5 [&>svg]:size-3.5 ${PULL_COLOUR[newest.state ?? 'unknown']}`}>
-        <PullRequestIcon />
+    <HoverCard card={() => <PullLines pulls={pulls} />}>
+      <span className="flex flex-none items-center gap-0.5">
+        <span aria-hidden className={`size-3.5 [&>svg]:size-3.5 ${PULL_COLOUR[newest.state ?? 'unknown']}`}>
+          <PullRequestIcon />
+        </span>
+        {pulls.length === 1 ? newest.number : `+${pulls.length}`}
       </span>
-      {pulls.length === 1 ? newest.number : `+${pulls.length}`}
+    </HoverCard>
+  );
+}
+
+/** A Draft pill on a Session that is not open and whose composer holds text that was not sent. */
+function DraftBadge({ sessionId }: { sessionId: string }) {
+  const draft = useStoredValue(sessionDraftKey(sessionId), z.string(), '');
+  if (draft.trim() === '') return null;
+  return (
+    <span
+      title="Text in this Session's message box was not sent"
+      className="flex-none rounded-full bg-accent-100 px-2 text-[11px] leading-4 font-semibold text-accent-700"
+    >
+      Draft
     </span>
   );
 }
@@ -330,18 +353,26 @@ function SessionRow({
                 isBusy(session) ? "group-hover:invisible group-has-[[aria-label^='Stop']:focus-visible]:invisible" : ''
               }`}
             >
-              {session.state === SessionState.Working && <WorkingChip since={runStart} />}
+              {session.state === SessionState.Working && (
+                <RunChip
+                  since={runStart}
+                  waiting={session.subagents.some((one) => one.status === SubagentStatus.Working)}
+                />
+              )}
+              {!selected && <DraftBadge sessionId={session.id} />}
               {STATE_WORD[session.state] && (
                 <span className="flex-none rounded-sm bg-accent-100 px-1.25 text-[11px] leading-4 font-medium text-accent-700">
                   {STATE_WORD[session.state]}
                 </span>
               )}
-              <span
-                className="flex-none text-[11px] text-neutral-600 tabular-nums"
-                title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
-              >
-                {ago(session.last_active_at)}
-              </span>
+              {session.state !== SessionState.Working && (
+                <span
+                  className="flex-none text-[11px] text-neutral-600 tabular-nums"
+                  title={`Started ${new Date(session.created_at).toLocaleString()}, last active ${new Date(session.last_active_at).toLocaleString()}`}
+                >
+                  {ago(session.last_active_at).replace(/ ago$/, '')}
+                </span>
+              )}
             </span>
           </span>
           <span className="flex items-center gap-2">

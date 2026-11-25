@@ -22,11 +22,11 @@ Every run's shell commands go through the macOS sandbox (Seatbelt). The sandbox 
 - the git control files the console's own `git` reads outside the sandbox (hooks, config and the files that say where a worktree lives);
 - a read-only run's working folder.
 
-The agent's file tools are held to the same closed paths: no reading the Keychain folder or the installed app, no editing the git control files. If the sandbox is unavailable, the run fails: the console never runs a command outside it, and no setting turns it off. The Setup agent page shows whether it works.
+The agent's file tools are held to the same closed paths: no reading the Keychain folder or the installed app, no editing the git control files. If the sandbox is unavailable, the run fails: the console never runs a command outside it, and no setting turns it off. Accounts & Usage shows whether it works, under On this machine.
 
 Because commands can reach any host, a run steered by text it read can send what it can read to a host of its choosing, and can read the data folder, including the session token that lets a command call the console's API as you. The guards that stay are the merge denials, the PROD write rule, the rule that the console pushes and opens pull requests, and the Approval on each integration write. Treat a Session's Access mode and the Connections it can reach with that in mind.
 
-The agent's saves outside its folders go through an Approval you answer, and a folder that holds sign-in keys, launch agents or the console's data is refused in every mode. Terminals and the Setup agent are not agent runs and are not sandboxed, and neither is a page in the Session's Browser panel.
+The agent's saves outside its folders go through an Approval you answer, and a folder that holds sign-in keys, launch agents or the console's data is refused in every mode. Terminals are not agent runs and are not sandboxed, and neither is a page in the Session's Browser panel.
 
 ## Production data
 

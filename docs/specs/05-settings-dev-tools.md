@@ -1,6 +1,7 @@
 # Settings: Dev tools connections
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) replaces the Setup agent: its page, terminal, `mcp-setup` entry and terminal gateway go, and an Anonymous Session's agent gets its tools with an Approval for each that saves, registers or reads a secret. The Connections list, the form, Test and the Access rules stand.
 **Design:** Connections: the Connections list, the type picker and the connection form (fields, Environment, Claude access, Test, Delete)
 
 ## Problem

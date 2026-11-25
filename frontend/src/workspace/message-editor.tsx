@@ -79,10 +79,29 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
   useLayoutEffect(() => {
     const node = root.current;
     if (!node || value === emitted.current || value === serialize(node)) return;
-    draw(node, value);
+    draw(node, value, true);
     emitted.current = value;
     if (document.activeElement === node) placeCaret(endOf(node));
   }, [value]);
+
+  // Back from another tab or window with the box still focused: the browser may have dropped the cursor.
+  useEffect(() => {
+    const restore = () => {
+      const node = root.current;
+      if (!node || document.visibilityState !== 'visible' || document.activeElement !== node) return;
+      const selection = document.getSelection();
+      if (selection && selection.rangeCount > 0 && node.contains(selection.anchorNode)) return;
+      placeCaret(
+        lastCaret.current && node.contains(lastCaret.current.startContainer) ? lastCaret.current : endOf(node),
+      );
+    };
+    document.addEventListener('visibilitychange', restore);
+    window.addEventListener('focus', restore);
+    return () => {
+      document.removeEventListener('visibilitychange', restore);
+      window.removeEventListener('focus', restore);
+    };
+  }, []);
 
   // The menus follow the cursor: a move into or out of a `$`, `@` or `/` word opens or closes its menu.
   useEffect(() => {
@@ -98,6 +117,7 @@ export const MessageEditor = forwardRef<MessageEditorHandle, Props>(function Mes
         if (!node) return;
         node.focus();
         placeCaret(endOf(node));
+        revealCaret(node);
       },
       replaceToken: (raw) => {
         const node = root.current;
@@ -241,7 +261,7 @@ function serialize(node: Node): string {
 }
 
 /** Draws `value` into the box: text, a `<br>` per line break, a chip per mention. */
-function draw(node: HTMLElement, value: string) {
+function draw(node: HTMLElement, value: string, anchorCursor = false) {
   node.replaceChildren();
   let at = 0;
   const text = (piece: string) => {
@@ -256,8 +276,11 @@ function draw(node: HTMLElement, value: string) {
     at = end;
   }
   text(value.slice(at));
-  // A line break at the very end needs one more for the cursor to sit on the new line.
-  if (value.endsWith('\n')) node.append(document.createElement('br'));
+  // A line break at the very end needs one more for the cursor to sit on the new line. In the box itself a last chip
+  // needs one too: the cursor after it has no line to draw on, and a `<br>` last in the box is not part of the text.
+  const last = node.lastChild;
+  const endsInChip = anchorCursor && last instanceof HTMLElement && last.hasAttribute(MENTION_ATTR);
+  if (value.endsWith('\n') || endsInChip) node.append(document.createElement('br'));
 }
 
 const SVG = 'http://www.w3.org/2000/svg';

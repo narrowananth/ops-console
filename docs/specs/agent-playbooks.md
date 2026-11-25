@@ -1,6 +1,7 @@
 # Agent Playbooks
 
 **Status:** shipped; Review PR, Check reply and Address comments open Sessions ([pr-actions-open-sessions](pr-actions-open-sessions.md))
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent, so no Trigger, Playbook or screen here names it.
 **Design:** Playbooks in `design/ops-console-sidebar.html` (sidebar, under Claude after Agents & accounts): the overview
 of Triggers and the Playbook as a flow, as `playbooks-redesign` describes. `design/ops-console.html` shows the Playbook
 on the Monitor Verify button and Report panel and a Session's Playbook link.

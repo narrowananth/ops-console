@@ -80,7 +80,7 @@ async function newSession(request: APIRequestContext): Promise<string> {
 const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser( :\d+)?$/ });
 
 const openSession = async (page: Page, id: string) => {
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await browserButton(page).waitFor();
 };
 

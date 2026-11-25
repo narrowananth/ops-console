@@ -60,6 +60,9 @@
   .list { width:290px; flex:none; border-right:1px solid var(--line); display:flex; flex-direction:column; }
   .list .top { padding:14px 12px 8px; display:flex; flex-direction:column; gap:8px; }
   .list h4 { margin:0; font-size:15px; }
+  .list .lh { display:flex; align-items:center; gap:6px; }
+  .ptog { width:32px; height:32px; border-radius:10px; background:var(--n200); color:var(--n700); display:grid; place-items:center; flex:none; }
+  .ptog svg { width:18px; height:18px; }
   .search { display:flex; align-items:center; gap:6px; border:1px solid var(--line); background:var(--card); border-radius:9px; padding:6px 10px; color:var(--n500); }
   .filters { display:flex; gap:6px; flex-wrap:wrap; }
   .filters .chip { padding:2px 9px; background:transparent; border:1px solid var(--line); }
@@ -83,9 +86,9 @@
   .tabs b { display:flex; gap:7px; align-items:center; font-weight:600; color:var(--n700); padding:5px 14px; border-radius:9px; }
   .tabs b.on { background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.15); }
   .tabs b em { font:600 10px var(--mono); background:var(--n300); border-radius:99px; padding:0 6px; font-style:normal; }
-  .body { flex:1; min-height:0; display:flex; gap:20px; overflow:hidden; }
-  .main { flex:1; min-width:0; padding:16px 0 16px 24px; display:flex; flex-direction:column; gap:14px; overflow:hidden; }
-  .side { width:260px; flex:none; padding:12px 18px 0 4px; display:flex; flex-direction:column; gap:0; }
+  .body { flex:1; min-height:0; display:flex; gap:24px; overflow:hidden; }
+  .main { flex:1; min-width:0; padding:16px 24px; display:flex; flex-direction:column; gap:14px; overflow:hidden; position:relative; }
+  .side { width:260px; flex:none; padding:12px 20px 0 4px; display:flex; flex-direction:column; gap:0; }
   .side section { border-bottom:1px solid var(--line); padding:10px 0; }
   .side h6 { margin:0 0 6px; font-size:13px; display:flex; gap:6px; align-items:center; }
   .side .row2 { display:flex; gap:6px; align-items:center; padding:2px 0 2px 16px; font-size:12px; color:var(--n700); }
@@ -96,6 +99,26 @@
   .act-h h3 { margin:0; font-size:14px; }
   .sel { border:1px solid var(--line); background:var(--card); border-radius:9px; padding:4px 10px; display:inline-flex; gap:6px; align-items:center; }
   .sel.open { border-color:var(--accent); box-shadow:0 0 0 3px var(--a100); }
+  /* The console's Dropdown (components/ui/dropdown.tsx), compact: a field button, and a list that floats under it */
+  .sel.cmp { width:160px; justify-content:space-between; padding:4px 10px; font-size:12px; }
+  .ddw { position:relative; margin-left:auto; }
+  .dd { position:absolute; top:calc(100% + 4px); right:0; width:192px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:6px; box-shadow:0 10px 30px rgba(0,0,0,.18); z-index:4; }
+  .dd .o { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; border-radius:8px; font-size:13px; }
+  .dd .o .l { flex:1; min-width:0; }
+  .dd .o.on { background:var(--a100); box-shadow:inset 0 0 0 1px var(--a200); }
+  .dd .o.on .l { font-weight:600; }
+  .dd .o .df { margin-top:1px; border-radius:99px; background:var(--n200); color:var(--n700); font-size:12px; padding:0 6px; white-space:nowrap; }
+  .dd .o .ck { width:12px; margin-top:1px; font-size:12px; color:var(--accent); }
+  .sbar { position:absolute; right:0; top:0; bottom:0; width:10px; background:color-mix(in srgb,var(--text) 6%,transparent); }
+  .sbar i { position:absolute; left:2px; right:2px; top:8px; height:150px; border-radius:99px; background:color-mix(in srgb,var(--text) 28%,transparent); }
+  .gut { position:absolute; right:10px; top:0; bottom:0; width:24px; border-left:1px dashed var(--accent); border-right:1px dashed var(--accent); background:color-mix(in srgb,var(--accent) 6%,transparent); }
+  .gut em { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) rotate(-90deg); white-space:nowrap; font-style:normal; font-size:10px; color:var(--accent); }
+  .cmenu { position:absolute; top:calc(100% + 4px); right:0; width:160px; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:6px; box-shadow:0 10px 30px rgba(0,0,0,.18); z-index:4; }
+  .cmenu .mi { padding:6px 10px; border-radius:8px; font-size:13px; }
+  .dlg { position:absolute; width:420px; background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 20px 50px rgba(0,0,0,.28); overflow:hidden; z-index:6; }
+  .dlg .b { padding:20px 20px 16px; display:flex; flex-direction:column; gap:8px; }
+  .dlg h5 { margin:0; font-size:16px; }
+  .dlg .f { display:flex; justify-content:flex-end; gap:8px; padding:12px 20px; border-top:1px solid var(--line); background:color-mix(in srgb,var(--surface) 40%,transparent); }
   .composer { border:1px solid var(--line); background:var(--card); border-radius:10px; padding:9px 12px; color:var(--n500); }
   .day { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--n600); display:flex; align-items:center; gap:10px; }
   .day::after { content:""; flex:1; height:1px; background:var(--line); }
@@ -125,7 +148,8 @@
   .tact { display:flex; gap:6px; align-items:center; padding:8px 12px 10px 48px; flex-wrap:wrap; }
   .tact .div { width:1px; height:18px; background:var(--divider); margin:0 4px; }
   .tact .reply { flex:1; min-width:140px; border:1px solid var(--line); border-radius:8px; padding:3px 10px; color:var(--n500); background:var(--bg); }
-  .more { color:var(--n600); border:1px solid var(--line); border-radius:8px; padding:3px 9px; }
+  .more { color:var(--n600); border-radius:8px; width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; margin:-4px 0; position:relative; }
+  .more.open { background:var(--n200); color:var(--text); }
 
   /* files changed */
   .toolbar { display:flex; gap:10px; align-items:center; padding:10px 24px; border-bottom:1px solid var(--line); position:relative; }
@@ -165,16 +189,14 @@
     <div class="app">
       <div class="logo"></div>
       <div class="g">Operate</div>
-      <div class="it">Monitor <span class="bd">3</span></div>
       <div class="it new on">Sessions <span class="bd">1</span></div>
       <div class="it new">Pull requests</div>
+      <div class="it">Monitor <span class="bd">3</span></div>
       <div class="it">Dev tools</div>
       <div class="g">Connect</div>
       <div class="it">Integrations</div>
       <div class="it">Connections</div>
       <div class="it">Repos</div>
-      <div class="it">Setup agent</div>
-      <div class="it gone">Permissions</div>
       <div class="g">Claude</div>
       <div class="it">Accounts &amp; Usage</div>
       <div class="it">Agent runs</div>
@@ -183,7 +205,7 @@
     </div>
     <div class="list">
       <div class="top">
-        <h4>Sessions</h4>
+        <div class="lh"><h4>Sessions</h4><span class="sp"></span><span class="ptog" title="Collapse the side panel"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M6 2.5v11"/><path d="M10.5 6 8.5 8l2 2"/></svg></span></div>
         <div style="display:flex;gap:8px"><div class="search sp">⌕ Search Sessions</div><span class="btn pri">+ New</span></div>
         <div class="filters"><span class="chip on">All</span><span class="chip">Needs you</span><span class="chip">Running</span><span class="chip">All Repos ▾</span></div>
       </div>
@@ -198,7 +220,7 @@
   <ul class="legend">
     <li>Pull requests page: the pull request list as today (groups by next step, Mine / Others / All), the pull request page on the right.</li>
     <li>A link to a Session or a pull request opens the matching page. The address keeps <span class="mono">?session=</span> and <span class="mono">?pr=</span>.</li>
-    <li>The folded strip of the list pane stays on both pages.</li>
+    <li>The folded strip of the list pane stays on both pages. The arrow in the list header is 32 px with an 18 px icon; on the strip it is 40 px.</li>
   </ul>
 </section>
 
@@ -209,7 +231,7 @@
   <div class="frame">
     <div class="rail1"><div class="logo"></div><i>◔</i><i class="on">⇄</i><i>▦</i></div>
     <div class="list" style="width:250px">
-      <div class="top"><h4>Pull requests</h4><div class="search">⌕ Search</div></div>
+      <div class="top"><div class="lh"><h4>Pull requests</h4><span class="sp"></span><span class="ptog" title="Collapse the side panel"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="M6 2.5v11"/><path d="M10.5 6 8.5 8l2 2"/></svg></span></div><div class="search">⌕ Search</div></div>
       <div class="grp">Changes requested <em>1</em></div>
       <div class="row sel"><div class="t"><span class="dot d-need"></span><span class="n">Tenant: hold Channel credentials…</span></div><div class="m">#89 · backend · agent</div></div>
       <div class="grp">Waiting on review <em>2</em></div>
@@ -224,7 +246,7 @@
       </div>
       <div class="body">
         <div class="main">
-          <div class="act-h"><h3>Activity</h3><span class="chip">3 open</span><span class="chip ok">6 resolved</span><span class="sp"></span><span class="sel">All activity ▾</span></div>
+          <div class="act-h"><h3>Activity</h3><span class="chip">3 open</span><span class="chip ok">6 resolved</span><span class="sp"></span><span class="sel cmp" title="Filter the activity: it opens on Open threads">Open threads <span>▾</span></span></div>
           <div class="composer">What do you want to say?</div>
 
           <div class="day">Today</div>
@@ -239,12 +261,11 @@
               <div class="a"><span class="ln">327</span>+ the row. Typed per Delivery provider: `keyId`, `teamId`, `privateKey`</div>
             </div>
             <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p>Same point: the Channel credential entry says "The secret a Delivery provider needs". Neither should name the store type in the term's wording.</p></div></div>
-            <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span><span class="sub">25/11 16:27</span></div><p>Done in <code>ec670e6</code>. Reworded <code>GLOSSARY.md</code> so neither entry names the store type.</p></div></div>
+            <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span><span class="sub">25/11 16:27</span><span class="sp"></span><span class="more" title="More for this comment">⋯</span></div><p>Done in <code>ec670e6</code>. Reworded <code>GLOSSARY.md</code> so neither entry names the store type.</p></div></div>
             <div class="tact">
               <span class="btn sm">Unresolve</span><span class="btn sm">Reply</span><span class="div"></span>
               <span class="btn sm agent" title="Agent reads the replies in this thread and says whether each is fixed">✓ Check reply</span>
               <span class="btn sm agent" title="Agent changes the code for this thread">✎ Address comment</span>
-              <span class="sp"></span><span class="more">⋯</span>
             </div>
           </div>
 
@@ -256,7 +277,7 @@
               <div class="a hl"><span class="ln">31</span>+ private static final String PREFIX = "/engage/";</div>
             </div>
             <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p><code>prefix</code> is unused. Nothing asserts the real ARN shape.</p></div></div>
-            <div class="tact"><span class="btn sm">Resolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span><span class="sp"></span><span class="more">⋯</span></div>
+            <div class="tact"><span class="btn sm">Resolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span></div>
           </div>
 
           <div class="thread resolved">
@@ -324,8 +345,8 @@
             </div>
             <div class="thread" style="border:0;border-radius:0">
               <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p>Same point: neither should name the store type in the term's wording.</p></div></div>
-              <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span></div><p>Done in <code>ec670e6</code>. Reworded so neither entry names the store type.</p></div></div>
-              <div class="tact"><span class="btn sm">Unresolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span><span class="sp"></span><span class="more">⋯</span></div>
+              <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span><span class="sp"></span><span class="more" title="More for this comment">⋯</span></div><p>Done in <code>ec670e6</code>. Reworded so neither entry names the store type.</p></div></div>
+              <div class="tact"><span class="btn sm">Unresolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span></div>
             </div>
           </div>
         </div>
@@ -337,6 +358,42 @@
     <li>Each Comments row jumps to its thread in the diff. A comment on a line the new commit moved shows <span class="chip out">Outdated</span>.</li>
     <li>The tree shows a count chip for the unresolved threads in a file and the +/− of the file. Expand all, Collapse all and the viewed bar stay in the toolbar.</li>
     <li>The inline thread has the same Resolve, Reply, Check reply and Address comment actions as in Activity.</li>
+  </ul>
+</section>
+
+
+<!-- 4 -->
+<section class="variant">
+  <h2>4. Activity filter, panel edge and a comment's menu</h2>
+  <p class="why">The Activity filter is the console's own dropdown, the one the Session composer menus use, never the operating system's. It opens on Open threads and the list marks that choice <span class="mono">default</span>; the choice is not kept across pages. The Overview panel keeps 24 px on its right edge, so its scrollbar never sits on the comment box, the filter or a comment. A comment of the operator's own has a three-dot button with Delete, which asks first; a comment of someone else's has no button. There is no thread-level menu.</p>
+  <div class="frame" style="width:1000px;height:600px">
+    <div class="detail">
+      <div class="body" style="gap:0">
+        <div class="main" style="padding-right:34px">
+          <div class="act-h"><h3>Activity</h3><span class="chip">3 open</span><span class="chip ok">6 resolved</span>
+            <span class="ddw"><span class="sel cmp open">Open threads <span>▴</span></span>
+              <div class="dd" role="listbox" aria-label="Filter the activity"><div class="o"><span class="l">All activity</span><span class="ck"></span></div><div class="o on"><span class="l">Open threads</span><span class="df">default</span><span class="ck">✓</span></div><div class="o"><span class="l">Resolved threads</span><span class="ck"></span></div><div class="o"><span class="l">Agent only</span><span class="ck"></span></div></div></span></div>
+          <div class="composer">What do you want to say?</div>
+          <div class="day">Today</div>
+          <div class="ev"><div class="av sm">AA</div><div class="tx"><b>Author A</b> updated the pull request with 1 commit <span class="mono">ec670e6</span> · 59 min ago</div></div>
+          <div class="thread" style="margin-top:20px">
+            <div class="fh"><span class="chip bad">open</span><span class="p">GLOSSARY.md · line 326</span></div>
+            <div class="cm"><div class="av">RR</div><div class="b"><div class="who"><b>Reviewer R</b><span class="sub">25/11 16:14</span></div><p>Same point: neither should name the store type in the term's wording. Someone else's comment: no button.</p></div></div>
+            <div class="cm"><div class="av ag">AG</div><div class="b"><div class="who"><b>Author A</b><span class="chip need">agent</span><span class="sub">25/11 16:27</span><span class="sp"></span><span class="more open" title="More for this comment">⋯<div class="cmenu" role="menu"><div class="mi">Delete</div></div></span></div><p>Done in <code>ec670e6</code>. Your own comment: the button shows.</p></div></div>
+            <div class="tact"><span class="btn sm">Resolve</span><span class="btn sm">Reply</span><span class="div"></span><span class="btn sm agent">✓ Check reply</span><span class="btn sm agent">✎ Address comment</span></div>
+          </div>
+          <div class="gut"><em>24 px</em></div><div class="sbar"><i></i></div>
+        </div>
+      </div>
+    </div>
+    <div class="dlg" style="right:60px;bottom:40px" role="alertdialog">
+      <div class="b"><h5>Delete this comment?</h5><div class="sub" style="font-size:13px">It is removed from the pull request on the host and cannot be undone.</div></div>
+      <div class="f"><span class="btn sm">Cancel</span><span class="btn sm pri">Delete</span></div>
+    </div>
+  </div>
+  <ul class="legend">
+    <li>Choosing Delete in the menu opens the confirm. Cancel, Escape and a click outside close it; Delete removes that comment on the Git host.</li>
+    <li>The same button and menu sit on each own comment of a diff thread, under its line in Files changed.</li>
   </ul>
 </section>
 

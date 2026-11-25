@@ -1,6 +1,7 @@
 # Troubleshooting guide
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent and the Permissions page. Full Disk Access, Start at login and the Run sandbox status are on Accounts & Usage. A Full Disk Access refusal shows in an Anonymous Session's read, not a Setup agent that cannot start.
 **Design:** none: a docs page in the site's current layout.
 
 ## Problem

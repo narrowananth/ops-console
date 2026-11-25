@@ -1,6 +1,7 @@
 # Session browser and processes
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent's terminal that this spec compares the Terminals dock to.
 **Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval (eight views). It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
 
 ## Problem
@@ -199,6 +200,21 @@ adds the same to a Session.
     wide. The size is kept per browser and side. The page measures only its own part of the panel: docking shrinks it,
     the viewer's Fill size and pixel ratio follow that part, the stream goes on, and closing DevTools gives the part back.
 
+### Keys, clipboard and drops
+
+57. The page holds the focus in a hidden text field of the console, so the keys and the system's input method reach the stream. A key
+    goes to Chrome as a key event with the editing commands a Mac gives it: Command+A, C, X, Z and Shift+Z, Option and Command
+    with the arrows (Shift selects) and Option+Backspace, as in Chrome. A held key repeats. Control+V pastes on a Mac as
+    Command+V does.
+58. Copy and cut take what Chrome would: the focused field's selection, else the page's. The daemon reads it and the
+    console writes it to the operator's clipboard, since headless Chrome has none. A password field and the size of a selection follow [console-ui-batch](console-ui-batch.md) 34 and 35.
+59. Paste puts the operator's clipboard text at the caret. An image or file goes to the page's focused file field, and is
+    ignored when there is none; the number and size of files follow [console-ui-batch](console-ui-batch.md) 33. A composed text (an accent, CJK, an emoji) is inserted as
+    typed once its composition ends, within the length of 35.
+60. A file dropped on the page is dropped there as a person's drop, at the point of the pointer, so a drop zone or a file
+    field takes it and the console does not open the file. A drop on nothing is the page's.
+61. A digit answers the agent's question only when the page does not hold the focus.
+
 ### Picking an element
 
 45. The toolbar's "Pick an element" button (a pointer arrow, `aria-pressed` while on) toggles pick mode for the current tab. The
@@ -326,6 +342,12 @@ adds the same to a Session.
 
 ## Not required
 
+- **Browser interface the stream does not draw**: a `<select>` list, a date or colour picker, a datalist, an autofill dropdown,
+  password and address autofill, and the context menu. Chrome draws these outside the page, so the screencast has no pixels
+  of them. The operator sees the page's own markup.
+- **The page's browser shortcuts**: find, zoom, address field and reload keys act on the console's tab, not on the
+  streamed page. The toolbar has Back, Forward and Reload.
+- **Windows and Linux keys** are encoded but not tested; the operator's Mac is the target.
 - **Passkeys, cookie import from the operator's browser, recording, annotation and picture-in-picture**: T3 Code has them.
   The operator signs in inside the panel; cookies stay per Session.
 - **Showing a test runner's own browser** (Playwright or Cypress headed) in the panel: the agent drives the panel's tabs
@@ -443,8 +465,8 @@ Stops the server on `port` when it is this Session's. 204. 404 `not_found` for a
 ### WebSocket `/browser/:tabId`
 
 Raw stream behind the token. The address may carry `w`, `h` and `dpr`, the viewer's size, so its first frame is taken at it. Server to client: a binary message per frame (the page's CSS width and height as two big-endian uint32, then the JPEG, which has
-those sizes times the page's device scale), `tab` (a changed `tab`; it carries `called_hosts` and `agent_active`), `dialog`.
-Client to server: `input` (pointer, key, wheel, text), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
+those sizes times the page's device scale), `tab` (a changed `tab`; it carries `called_hosts` and `agent_active`), `dialog`, `clipboard` (`text`, to the viewer whose copy or cut it was).
+Client to server: `input` (pointer, key with optional `commands` and `repeat`, wheel, text), `paste` (`text`, `files`, and `x`, `y` for a drop), `compose` (`text`), `resize` (`width`, `height`, and `dpr`, 1 to 3, default 1: the viewer's
 pixels per CSS pixel, which a Fill page takes as its device scale), `focus`, `pick` (`action` is `start`, `end`, `hover` or `click`; the last two carry `x` and `y`
 in the page's CSS pixels, and one from a viewer not in pick mode is dropped). To the viewer that clicked only: `picked` (`capture`: `{ page_url, page_title,
 tag, selector, id, classes, role, name, text, attributes, html, box, styles, crop }`, `crop` a base64 JPEG or null) or `pick_failed` (`message`). `closed` then
@@ -537,6 +559,12 @@ the DevTools dock are not in it, and the mock still shows the old External butto
 - **Browser** (`frontend/e2e/session-browser-pick.spec.ts`, a real daemon and Chrome): 3 (the icons and their names, no "..." menu, a
   narrow panel), 13, and 45 to 51 (the outline, a click that does not reach the page, the chips, several picks, send with the block
   and the crop, Escape, a tab's window).
+- **Backend + SQLite** (`browser.test.ts`, a real Chrome): 57 to 60: select all and copy, cut, undo and redo, word and line moves with
+  Shift, a held key, pasted and composed text, a pasted file in a file field, a dropped file on a zone and a file field.
+- **Unit** (`frontend/e2e/browser-input.spec.ts`): 57 to 59's key encoding: text with Control, Command and Option, input method keys,
+  the paste shortcuts, and that plain keys carry no editing commands. **Browser** (`frontend/e2e/session-browser-keys.spec.ts`, a real daemon and Chrome):
+  57 to 61 through the console: Backspace, arrows, Command+A, C, X, Z, V, Control+V, composed text, a held key, a drop, and a
+  digit typed in the page while a question is open.
 - **Backend + SQLite** (`browser-pick.test.ts`, a real Chrome): 46 to 48 and 53: the outline shows and goes, the capture's fields, no
   click on the page, a scrolled page, the cuts, and no typed value, password, cookie or storage in anything returned.
 - **Browser** (`frontend/e2e/session-browser-window.spec.ts`, a real daemon and Chrome, a popup of the test's browser): 35 to 38.

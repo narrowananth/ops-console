@@ -31,6 +31,8 @@ export type ApprovalRequest = {
   isProd: boolean;
   /** An integration CLI the operator may stop being asked about for this Session. */
   trustCli?: string;
+  /** The subagent whose tool call asked, when one did. */
+  subagentId?: string | null;
 };
 
 @Injectable()
@@ -56,6 +58,7 @@ export class ApprovalsService {
           sessionId: request.sessionId,
           kind: request.kind,
           summary,
+          subagentId: request.subagentId ?? null,
           trustCli: request.trustCli ?? null,
         })
         .run();
@@ -169,6 +172,7 @@ export class ApprovalsService {
           target,
           command,
           is_prod: isProd ?? false,
+          subagent_id: approval.subagentId,
           trust_cli: approval.trustCli,
         },
       }));

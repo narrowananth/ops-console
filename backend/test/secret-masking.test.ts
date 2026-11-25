@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { maskText } from '../src/terminals/secret-masking';
+import { maskText } from '../src/anonymous-tools/secret-masking';
 
 function masker() {
   const kept: string[] = [];

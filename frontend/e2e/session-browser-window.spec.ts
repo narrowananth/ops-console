@@ -54,7 +54,7 @@ const browserButton = (page: Page) => page.getByRole('button', { name: /^Browser
 
 async function openPanelOn(page: Page, request: APIRequestContext, address: string) {
   const id = await newSession(request);
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await panel.getByRole('textbox', { name: 'Address' }).fill(address);
@@ -151,7 +151,7 @@ test('the window button waits for a tab, and a blocked popup says so (35)', asyn
     window.open = () => null;
   });
   const id = await newSession(request);
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await expect(panel.getByRole('button', { name: 'Open in a window' })).toBeDisabled();

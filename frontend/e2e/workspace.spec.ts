@@ -151,7 +151,7 @@ test("a Session row shows its pull requests and, on hover, a card with each one'
   await expect(row).toContainText('Opus');
   await expect(row).toContainText('feature/sandbox');
   await row.getByRole('button').hover();
-  const card = page.getByRole('tooltip');
+  const card = page.getByRole('tooltip').filter({ hasText: 'Spec: privacy docs' });
   await expect(card).toContainText('#138');
   await expect(card).toContainText('Run sandbox: a Loopback switch');
   await expect(card).toContainText('#136');
@@ -397,7 +397,7 @@ test('every message the operator sent copies; the last one edits, reverts the fi
   await expect(mine).toHaveCount(2);
   await expect(mine.first().getByRole('button', { name: 'Edit' })).toHaveCount(0);
   await mine.first().hover();
-  await mine.first().getByRole('button', { name: 'Copy' }).click();
+  await mine.first().getByRole('button', { name: 'Copy message' }).click();
   await expect(mine.first().getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('hello');
 

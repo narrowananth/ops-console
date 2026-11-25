@@ -141,7 +141,7 @@ async function open(page: Page, uncommitted: number, extra: Record<string, unkno
   await page.route(/\/api\/repos\/r1\/pull-requests(\?.*)?$/, (route) =>
     route.fulfill({ json: { data: [pull('passed')], meta: { synced_at: NOW, stale: false, next_cursor: null } } }),
   );
-  await page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 }
 
 test('the card opens the folder in VS Code and the file manager', async ({ page }) => {

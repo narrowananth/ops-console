@@ -79,7 +79,7 @@ const createPr = async (page: Page) => {
   await page.getByRole('menuitem', { name: 'Create PR' }).click();
 };
 
-const open = (page: Page) => page.goto(`${daemon.url}/workspace?session=s1#token=${daemon.token}`);
+const open = (page: Page) => page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
 test('the agent drafts the text, the operator edits it, and confirming has the console open the pull request', async ({
   page,

@@ -86,7 +86,7 @@ const drawnAtStageSize = (canvas: Locator) =>
 
 async function openPanel(page: Page, request: APIRequestContext) {
   const id = await newSession(request);
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await browserButton(page).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await panel.getByRole('textbox', { name: 'Address' }).fill(origin);
@@ -227,7 +227,7 @@ test.describe('the toolbar', () => {
       return route.fulfill({ json: { data: [agent] } });
     });
     const id = await newSession(request);
-    await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+    await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
     await page.getByRole('link', { name: 'the app' }).click();
     await expect(
       page.getByRole('complementary', { name: 'Browser' }).getByRole('tab', { name: /Pick page/ }),

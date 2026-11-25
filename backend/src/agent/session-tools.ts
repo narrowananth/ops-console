@@ -96,12 +96,12 @@ export interface ProcessTools {
   stopByName(sessionId: string, name: string): Promise<{ name: string; state: string }>;
 }
 
-type ToolResult = {
+export type ToolResult = {
   content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[];
   isError?: boolean;
 };
 
-const text = (value: unknown): ToolResult => ({
+export const text = (value: unknown): ToolResult => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }],
 });
 
@@ -109,7 +109,7 @@ const text = (value: unknown): ToolResult => ({
  * A Stop on the run ends the call: the tool answers at once with "Stopped by the operator." while the page's own work
  * finishes on its own. Two signals end it: the run's, and the one the MCP request carries when it is cancelled.
  */
-async function guarded(
+export async function guarded(
   work: () => Promise<ToolResult>,
   failure: string,
   extra: unknown,

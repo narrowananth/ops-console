@@ -93,6 +93,9 @@ export function useLiveEvents(): void {
       }
       if (event.event === 'keychain.wait_changed') refetch(queryKeys.keychainWait);
       if (event.event === 'keychain.handover_refused') refetch(queryKeys.keychainHandover);
+      if (event.event === 'secret.requested' || event.event === 'secret.settled') {
+        refetch(queryKeys.secretRequests(event.data.session_id));
+      }
       if (event.event === 'update.changed' || event.event === 'settings.updated') refetch(queryKeys.updates);
       if (
         event.event === 'account.updated' ||

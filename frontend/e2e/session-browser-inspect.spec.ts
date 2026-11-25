@@ -58,7 +58,7 @@ async function newSession(request: APIRequestContext): Promise<string> {
 
 async function openPanelOn(page: Page, request: APIRequestContext, address: string) {
   const id = await newSession(request);
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await page.getByRole('button', { name: /^Browser( :\d+)?$/ }).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await panel.getByRole('textbox', { name: 'Address' }).fill(address);
@@ -277,7 +277,7 @@ test('Inspect waits for a page, and a blocked window says so (39, 41)', async ({
     window.open = () => null;
   });
   const id = await newSession(request);
-  await page.goto(`${daemon.url}/workspace?session=${id}#token=${daemon.token}`);
+  await page.goto(`${daemon.url}/sessions?session=${id}#token=${daemon.token}`);
   await page.getByRole('button', { name: /^Browser( :\d+)?$/ }).click();
   const panel = page.getByRole('complementary', { name: 'Browser' });
   await expect(inspect(panel)).toBeDisabled();

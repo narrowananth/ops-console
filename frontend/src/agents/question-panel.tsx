@@ -73,7 +73,8 @@ export function QuestionPanel({
     onSend(answersText(questions, answers));
   };
 
-  // 1-9 picks the option of that number, unless the operator is typing.
+  // 1-9 picks the option of that number, unless the operator is typing. The Session browser's page takes keys in a
+  // hidden textarea, so a digit typed into the page is the page's.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey || pending || !question) return;

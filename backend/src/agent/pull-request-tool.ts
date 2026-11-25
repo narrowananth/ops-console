@@ -2,6 +2,7 @@ import { createSdkMcpServer, type McpSdkServerConfigWithInstance, tool } from '@
 import { FindingSeverity, PrAction, ReplyVerdict, ReviewVerdict, ThreadOutcome } from '@ops-console/shared';
 import { z } from 'zod';
 import { ApiError } from '../common/errors';
+import { type AnonymousTools, anonymousSessionTools } from './anonymous-tools';
 import { type IntegrationRunner, integrationInputSchema } from './integration-cli';
 import { type NewRelicQuery, newRelicQueryInputSchema, runNewRelicQuery } from './new-relic-tool';
 import { type FileSaver, runSaveFile, saveFileInputSchema } from './output-files';
@@ -225,6 +226,8 @@ export function consoleToolsServer(
     newRelic?: NewRelicQuery | null;
     browser?: BrowserTools | null;
     processes?: ProcessTools | null;
+    /** The setup tools of an Anonymous Session the operator started. */
+    anonymous?: AnonymousTools | null;
     /** Aborts when the operator stops the run. */
     signal?: AbortSignal;
   },
@@ -241,6 +244,7 @@ export function consoleToolsServer(
     newRelic = null,
     browser = null,
     processes = null,
+    anonymous = null,
     signal,
   } = tools;
   return createSdkMcpServer({
@@ -310,6 +314,7 @@ export function consoleToolsServer(
             ),
           ]
         : []),
+      ...(anonymous ? anonymousSessionTools(anonymous, sessionId, signal) : []),
       ...sessionTools(browser, processes, sessionId, signal),
     ],
   });
