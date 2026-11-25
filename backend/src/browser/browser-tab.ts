@@ -24,6 +24,7 @@ import { isLoopbackHost } from './addresses';
 import { ElementPicker } from './element-picker';
 import { InspectorRelay } from './inspector-relay';
 import { jpegSize } from './jpeg-size';
+import { dropFiles, fillFocusedFileField, readSelection, stageFiles } from './page-transfer';
 
 const RING = 200;
 const MAX_HOSTS = 50;
@@ -656,23 +657,48 @@ export class BrowserTab {
       if (message.type === 'mouse') {
         await this.flushMove();
         await this.dispatchMouse(message);
-      } else if (message.type === 'text') {
+      } else if (message.type === 'text' || message.type === 'compose') {
         await this.cdp.send('Input.insertText', { text: message.text });
+      } else if (message.type === 'paste') {
+        await this.paste(message);
       } else {
-        const text = message.text ?? (message.key === 'Enter' ? '\r' : undefined);
-        const typed = message.action === 'down' && text !== undefined && (message.modifiers & 6) === 0;
-        await this.cdp.send('Input.dispatchKeyEvent', {
-          type: message.action === 'up' ? 'keyUp' : typed ? 'keyDown' : 'rawKeyDown',
-          key: message.key,
-          code: message.code,
-          modifiers: message.modifiers,
-          windowsVirtualKeyCode: keyCode(message.key),
-          ...(typed ? { text } : {}),
-        });
+        await this.key(viewer, message);
       }
       // A press that is not yet released must not see the page change under it.
       if (!(message.type === 'mouse' && message.action === 'down')) this.applyTakeover();
     });
+  }
+
+  private async key(viewer: WebSocket, message: Extract<BrowserClientMessage, { type: 'key' }>): Promise<void> {
+    const commands = message.action === 'down' ? (message.commands ?? []) : [];
+    // A cut removes what it copies, so the selection is read first.
+    const copies = commands.includes('copy') || commands.includes('cut');
+    const selected = copies ? await readSelection(this.cdp).catch(() => '') : '';
+    const text = message.text ?? (message.key === 'Enter' ? '\r' : undefined);
+    const typed = message.action === 'down' && text !== undefined && (message.modifiers & 6) === 0;
+    await this.cdp.send('Input.dispatchKeyEvent', {
+      type: message.action === 'up' ? 'keyUp' : typed ? 'keyDown' : 'rawKeyDown',
+      key: message.key,
+      code: message.code,
+      modifiers: message.modifiers,
+      windowsVirtualKeyCode: keyCode(message.key),
+      ...(typed ? { text } : {}),
+      ...(commands.length > 0 ? { commands } : {}),
+      ...(message.repeat ? { autoRepeat: true } : {}),
+    });
+    // Headless Chrome has no clipboard of the operator's: the viewer writes what the page copied.
+    if (selected !== '') this.send({ type: 'clipboard', text: selected }, viewer);
+  }
+
+  /** Text goes in at the caret. Files go to the page's focused file field, or are dropped where the viewer's drop was. */
+  private async paste(message: Extract<BrowserClientMessage, { type: 'paste' }>): Promise<void> {
+    if (message.text) await this.cdp.send('Input.insertText', { text: message.text });
+    if (!message.files || message.files.length === 0) return;
+    const staged = await stageFiles(message.files);
+    // The page reads a file when it wants it, so the copy stays until the tab closes.
+    this.chosenDirs.push(staged.dir);
+    if (message.x !== undefined && message.y !== undefined) await dropFiles(this.cdp, staged.paths, message.x, message.y);
+    else await fillFocusedFileField(this.cdp, staged.paths);
   }
 
   /** Pick mode: the point is the page's CSS pixels. The capture goes back to the viewer that clicked, and to no other. */
