@@ -624,14 +624,16 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
         await settled(h, session, created.id);
         const viewer = await watch(h.daemon, created.id);
         const page = <T>(script: string) => read<T>(h, session, created.id, script);
-        const focus = (id: string) =>
-          h.tools.evaluate(session, `document.getElementById('${id}').focus()`, created.id);
+        const focus = (id: string) => h.tools.evaluate(session, `document.getElementById('${id}').focus()`, created.id);
         const press = (key: string, modifiers: number, commands: string[], extra: object = {}) => {
           const code = key.length === 1 ? `Key${key.toUpperCase()}` : key;
           viewer.send({ type: 'key', action: 'down', key, code, modifiers, commands, ...extra });
           viewer.send({ type: 'key', action: 'up', key, code, modifiers });
         };
-        const field = () => page<[string, number, number]>(`(() => { const f = document.getElementById('field'); return [f.value, f.selectionStart, f.selectionEnd]; })()`);
+        const field = () =>
+          page<[string, number, number]>(
+            `(() => { const f = document.getElementById('field'); return [f.value, f.selectionStart, f.selectionEnd]; })()`,
+          );
         const clipboards = () =>
           viewer.messages.flatMap((message) => (message.type === 'clipboard' ? [message.text] : []));
         const out = () => page<string>(`document.getElementById('out').textContent`);
@@ -713,7 +715,11 @@ describe.skipIf(!chromePath)('Session browser in a real Chrome', () => {
         t.viewer.send({ type: 'compose', text: 'x'.repeat(2000) });
         t.viewer.send({ type: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers: 0, commands: ['bad name!'] });
         t.viewer.send({ type: 'text', text: '.' });
-        await until(t.field, ([value]) => value === 'pasted é😀 plain.', 'a bad message to be dropped and the next one taken');
+        await until(
+          t.field,
+          ([value]) => value === 'pasted é😀 plain.',
+          'a bad message to be dropped and the next one taken',
+        );
       });
 
       it('gives a pasted file to the focused file field and ignores it otherwise', async () => {
