@@ -1,6 +1,7 @@
 # Session browser and processes
 
 **Status:** shipped
+**Superseded in part:** [console-ui-batch](console-ui-batch.md) removes the Setup agent's terminal that this spec compares the Terminals dock to.
 **Design:** `design/session-browser.html`: the Browser panel in six states, the Terminals dock in its states and the agent's Approval (eight views). It departs from every screen: neither `design/ops-console.html` nor `design/ops-console-sidebar.html` has a browser or a process panel.
 
 ## Problem
@@ -206,10 +207,10 @@ adds the same to a Session.
     with the arrows (Shift selects) and Option+Backspace, as in Chrome. A held key repeats. Control+V pastes on a Mac as
     Command+V does.
 58. Copy and cut take what Chrome would: the focused field's selection, else the page's. The daemon reads it and the
-    console writes it to the operator's clipboard, since headless Chrome has none. A password field copies nothing.
+    console writes it to the operator's clipboard, since headless Chrome has none. A password field and the size of a selection follow [console-ui-batch](console-ui-batch.md) 34 and 35.
 59. Paste puts the operator's clipboard text at the caret. An image or file goes to the page's focused file field, and is
-    ignored when there is none, up to ten files of 10 MB each. A composed text (an accent, CJK, an emoji) is inserted as
-    typed once its composition ends.
+    ignored when there is none; the number and size of files follow [console-ui-batch](console-ui-batch.md) 33. A composed text (an accent, CJK, an emoji) is inserted as
+    typed once its composition ends, within the length of 35.
 60. A file dropped on the page is dropped there as a person's drop, at the point of the pointer, so a drop zone or a file
     field takes it and the console does not open the file. A drop on nothing is the page's.
 61. A digit answers the agent's question only when the page does not hold the focus.
@@ -561,7 +562,7 @@ the DevTools dock are not in it, and the mock still shows the old External butto
 - **Backend + SQLite** (`browser.test.ts`, a real Chrome): 57 to 60: select all and copy, cut, undo and redo, word and line moves with
   Shift, a held key, pasted and composed text, a pasted file in a file field, a dropped file on a zone and a file field.
 - **Unit** (`frontend/e2e/browser-input.spec.ts`): 57 to 59's key encoding: text with Control, Command and Option, input method keys,
-  the paste shortcuts, the editing commands. **Browser** (`frontend/e2e/session-browser-keys.spec.ts`, a real daemon and Chrome):
+  the paste shortcuts, and that plain keys carry no editing commands. **Browser** (`frontend/e2e/session-browser-keys.spec.ts`, a real daemon and Chrome):
   57 to 61 through the console: Backspace, arrows, Command+A, C, X, Z, V, Control+V, composed text, a held key, a drop, and a
   digit typed in the page while a question is open.
 - **Backend + SQLite** (`browser-pick.test.ts`, a real Chrome): 46 to 48 and 53: the outline shows and goes, the capture's fields, no

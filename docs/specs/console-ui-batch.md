@@ -33,7 +33,7 @@ The operator reported a set of faults and gaps in daily use:
 ### Session view
 
 9. A user message has a Copy prompt link button beside Copy. It copies a link to that message in its Session; opening the link shows the Session with that message in view. The link carries no `#`.
-10. A turn that spawned subagents ends with a row: a stack of up to three avatars and `+N`, `N subagents`, a sub-label (`N working`, `N done`, or both), the time since the first started, and a chevron. Expanded, it lists each subagent: avatar with a blue dot while running, title, status (`Running`, `Done`, `Failed`, `Stopped`), time, and for a spawned Session a link that opens it.
+10. A turn that spawned subagents ends with a row: a stack of up to three avatars and `+N`, `N subagents`, a sub-label (`N working`, `N done`, or both), the time since the first started, and a chevron. Expanded, it lists each subagent: avatar with a blue dot while running, title, status (`Running`, `Done`, `Failed`, `Stopped`), and time.
 11. Hovering a subagent, in that list or in the Lineage list, opens a card: title, model, status with its time, and the Session's branch.
 12. The Lineage heading reads `Lineage · N running` when any runs, with the subagents listed under it, each with the same status word and a blue dot while running. Its tray link names what it opens.
 13. A Session waiting on subagents shows the waiting line above the composer: the count, the subagents' titles, an info icon and Stop. When a subagent's tool call needs an Approval, a line above it reads `Subagent needs approval`, names that subagent and has an `Open approval` button that scrolls to the Approval.
@@ -54,6 +54,9 @@ The operator reported a set of faults and gaps in daily use:
 22. A number key answers a pending question only when the page does not hold the focus.
 23. A held key repeats in the page.
 24. A page dialog (`alert`, `confirm`, `prompt`) shows in the console as it does today.
+33. Pasted or dropped files are capped at 10 files of 10 MB each; the extra ones are skipped, with a notice.
+34. Copying from a password field puts nothing on the clipboard.
+35. A selection sent to the clipboard is cut at 1 MB, and composed text at 1000 characters.
 
 ### Setup removed, Anonymous Session in its place
 
@@ -61,7 +64,7 @@ The operator reported a set of faults and gaps in daily use:
 26. An Anonymous Session's agent can do what the Setup agent did, with the same limits: test and save a Connection, list Connections, connect a Connector, add, list and authenticate an MCP Server, read a local file, folder or web page with secrets masked, read other apps' saved passwords with the operator's consent, and ask for a secret in a masked field that goes to the Keychain and never to the agent.
 27. Each tool that saves, registers or reads a secret asks the operator for an Approval in every Access mode but `full`, naming what it will do. A masked field shows in the Session where the question would, and the agent is told only that a secret was stored.
 28. Full Disk Access, Start at login and the Run sandbox status show on Accounts & Usage, in a section after Notifications, with the rows and wording the Setup page had. A refused Keychain handover shows there too.
-29. A Session whose runs lack Full Disk Access says so in the Approval or the failure it already shows. Nothing else changes for it.
+29. When macOS refuses a read for lack of permission, `read_local_file` and `list_local_folder` tell the operator to turn on Full Disk Access under Accounts & Usage, On this machine. Runs themselves are unchanged.
 
 ### What must not regress
 
@@ -74,10 +77,11 @@ The operator reported a set of faults and gaps in daily use:
 - **One change**: the operator asked for one pull request. The streams are built in separate worktrees and merged in this order: Setup removal, Sessions list and view, Pull requests page, subagent display, Session browser.
 - **Draft**: the draft is the text already kept per Session; the list reads it and listens for changes. No new store.
 - **Caret**: focus moves on opening a Session, not on every render.
-- **Subagents**: they stay subagents, not Sessions. The list links only a subagent that spawned a Session. Per-subagent Stop and subagent transcripts stay out ([session-panel-and-subagents](session-panel-and-subagents.md)); the Lineage rows have no stop square.
+- **Subagents**: they stay subagents, not Sessions. The list has no link to open one. Per-subagent Stop and subagent transcripts stay out ([session-panel-and-subagents](session-panel-and-subagents.md)); the Lineage rows have no stop square.
 - **Subagent model**: read from the usage lines the daemon already keeps per subagent.
 - **Approval**: an Approval records the subagent that asked, when one did.
 - **Merging**: a pull request's merged state keeps showing as it does (the badge colour and the status word). T3 Code has no further merge indication to copy.
+- **Numbering**: 33 to 35 sit in the Session browser group and follow 24, so no number the tests cite moved.
 - **Browser clipboard**: the page's selection is read in the page and written by the console to the operator's clipboard. Headless Chrome has no clipboard of its own.
 - **Moved to Accounts & Usage**: the section is named `On this machine`. Start at login is included where the daemon can read it.
 - **Setup tools**: the services the Setup agent called stay (Connections, Connectors, MCP Servers, masking, the local reads). The Setup page, its terminal, the `mcp-setup` entry and the terminal gateway go.
@@ -88,10 +92,11 @@ The operator reported a set of faults and gaps in daily use:
 - **Browser find, zoom and address shortcuts**: Command+F, Command+L, Command+R and zoom act on the console's page, not the streamed one. The toolbar has Back, Forward and Reload.
 - **Downloads** stay refused.
 - **Windows and Linux keys** in the Session browser are not tested.
+- **Browser clipboard write** needs the page to be focused and a secure origin. In a browser that refuses a clipboard write from a socket message, copy shows a notice instead.
 
 ## Safety
 
-An Anonymous Session's agent gains tools that write the console's own records and read local files. Each asks first (27), the secret never reaches the agent or the transcript, and the console masks what it reads. This reverses nothing in ADR 0002, 0004 or 0005; it moves where the Setup agent's tools live. ADR 0006 and 0007 lose their Setup agent paragraphs. The Run sandbox does not change. Nothing else changes in the agent's reach.
+An Anonymous Session's agent gains tools that write the console's own records and read local files. Each asks first (27), the secret never reaches the agent or the transcript, and the console masks what it reads. The file and folder reads refuse the login Keychain folder and `~/.ops-console`, links resolved ([ADR 0006](../adr/0006-agent-runs-sandboxed-by-the-os.md)). This reverses nothing in ADR 0002, 0004 or 0005; it moves where the Setup agent's tools live. ADR 0006 and 0007 lose their Setup agent paragraphs. The Run sandbox does not change. Nothing else changes in the agent's reach.
 
 ## API
 
@@ -114,6 +119,18 @@ Unchanged, kept for Accounts & Usage. `POST /terminals/disk-access/settings` and
 ### Subagent in the Session payload
 
 `subagents[]` gains `model` (string or null). An Approval gains `subagent_id` (string or null). Both nullable, so existing rows and clients read as before.
+
+### `GET /sessions/:id/secret-requests`
+
+The masked fields this Session's agent waits on, for a page that opens after one was asked: `{ data: [{ request_id, label }] }`. The label says what the secret is, never its value.
+
+### `POST /sessions/:id/secret-requests/:request_id`
+
+Body `{ value }` (a non-empty string): the operator's answer. 204 with no body. `404 not_found` when no such request waits for this Session. The value stays in the daemon; nothing returns or logs it.
+
+### WebSocket `/ws` events
+
+`secret.requested` (`{ session_id, request_id, label }`) when the agent asks for a masked field, and `secret.settled` (`{ session_id, request_id }`) when the operator answered or a Stop or the Session's end took it away.
 
 ### WebSocket `browser` messages
 
@@ -157,9 +174,9 @@ Existing rows stay null.
 
 ## Seams
 
-- **Browser input encoding** (unit): 18 to 20, 23.
-- **Browser daemon, real Chrome** (backend): 18 to 21, 24.
-- **Session browser stream** (browser e2e): 18, 19, 22.
+- **Browser input encoding** (unit): 18 to 20, 23. Plain keys carry no commands and Command keys mean nothing off a Mac; Chrome pins the rest.
+- **Browser daemon, real Chrome** (backend): 18 to 21, 24, 33 to 35.
+- **Session browser stream** (browser e2e): 18, 19, 22, and the notice of Not required's clipboard write.
 - **Sessions list and row** (frontend e2e): 4, 6, 7, 8.
 - **Composer** (frontend e2e): 5.
 - **Transcript** (frontend e2e): 9, 10, 14.
@@ -167,8 +184,8 @@ Existing rows stay null.
 - **Subagent model and Approval** (backend + SQLite): 11, 13.
 - **Pull requests page** (frontend e2e): 15, 16, 17.
 - **Sidebar and shell** (frontend e2e): 1 to 3.
-- **Anonymous Session tools** (backend + SQLite): 26, 27.
-- **Accounts & Usage** (frontend e2e): 28, 29.
+- **Anonymous Session tools** (backend + SQLite): 26, 27, and the closed folders of Safety. **Local reads** (`local-sources.test.ts`): 29 and the closed folders.
+- **Accounts & Usage** (frontend e2e): 28.
 - **Regression**: 30 to 32 by the existing tests.
 
 ## Out of scope
