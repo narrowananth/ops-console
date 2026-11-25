@@ -350,11 +350,12 @@ export class SessionsService {
     const row = this.get(id);
     const own = this.kinds.get(row.kind)?.patch;
     if (patch.connection_ids !== undefined && !own) throw validationFailed('invalid body: connection_ids');
+    // Every field is checked before any is written.
+    const extraRepos =
+      patch.extra_repo_ids === undefined ? {} : { extraRepoIds: this.checkedExtraRepos(row, patch.extra_repo_ids) };
     own?.(row, patch);
     const values = {
-      ...(patch.extra_repo_ids === undefined
-        ? {}
-        : { extraRepoIds: this.checkedExtraRepos(row, patch.extra_repo_ids) }),
+      ...extraRepos,
       ...(patch.title === undefined ? {} : { title: patch.title }),
       ...(patch.model === undefined ? {} : { model: patch.model }),
       ...(patch.effort === undefined ? {} : { effort: patch.effort }),

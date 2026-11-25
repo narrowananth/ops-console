@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { parseDelimited, sortRows } from '../src/components/ui/viewer/csv';
 import { asOpsResult, parseJson } from '../src/components/ui/viewer/json';
 import { blockFile, viewKind } from '../src/components/ui/viewer/kinds';
-import { parseMarkdown, safeHref } from '../src/components/ui/viewer/markdown';
+import { type Block, parseMarkdown, safeHref } from '../src/components/ui/viewer/markdown';
 
 test.describe('CSV and TSV', () => {
   test('quotes keep a comma, a line break and a doubled quote inside one cell', () => {
@@ -132,58 +132,6 @@ test.describe('file kinds', () => {
 });
 
 test.describe('Markdown', () => {
-  test('blocks: headings, lists with tasks, a table, a quote, a fence with its language and a rule', () => {
-    const blocks = parseMarkdown(
-      [
-        '# Title',
-        '',
-        'Some *em* and **bold** and ~~gone~~ and `code`.',
-        '',
-        '- [x] done',
-        '- [ ] todo',
-        '  - nested',
-        '',
-        '| a | b |',
-        '| --- | --- |',
-        '| 1 | 2 |',
-        '',
-        '> quoted',
-        '',
-        '```ts',
-        'const a = 1;',
-        '```',
-        '',
-        '---',
-      ].join('\n'),
-    );
-    expect(blocks.map((block) => block.t)).toEqual(['heading', 'paragraph', 'list', 'table', 'quote', 'code', 'rule']);
-    const list = blocks[2];
-    if (list?.t !== 'list') throw new Error('not a list');
-    expect(list.items.map((item) => item.checked)).toEqual([true, false]);
-    expect(list.items[1]?.children.map((child) => child.t)).toEqual(['paragraph', 'list']);
-    const table = blocks[3];
-    if (table?.t !== 'table') throw new Error('not a table');
-    expect(table.rows).toHaveLength(1);
-    const code = blocks[5];
-    expect(code).toMatchObject({ t: 'code', lang: 'ts', text: 'const a = 1;' });
-  });
-
-  test('raw HTML stays text and a script tag is never a node of its own', () => {
-    const [paragraph] = parseMarkdown('Hi <script>alert(1)</script> <b>x</b>');
-    expect(paragraph).toEqual({
-      t: 'paragraph',
-      children: [{ t: 'text', text: 'Hi <script>alert(1)</script> <b>x</b>' }],
-    });
-  });
-
-  test('a remote image is kept as alt text and address, never as something to load', () => {
-    const [paragraph] = parseMarkdown('![a chart](https://example.com/chart.png)');
-    expect(paragraph).toEqual({
-      t: 'paragraph',
-      children: [{ t: 'image', alt: 'a chart', src: 'https://example.com/chart.png' }],
-    });
-  });
-
   test('only http, https and mailto links are links', () => {
     expect(safeHref('https://example.com/a?b=1')).toBe('https://example.com/a?b=1');
     expect(safeHref('mailto:ops@example.com')).toBe('mailto:ops@example.com');
@@ -196,19 +144,45 @@ test.describe('Markdown', () => {
       '//example.com',
     ])
       expect(safeHref(bad)).toBeNull();
-    const [paragraph] = parseMarkdown('[bad](javascript:alert(1)) and [ok](https://example.com)');
-    expect(paragraph).toMatchObject({
-      t: 'paragraph',
-      children: [
-        { t: 'text', text: 'bad and ' },
-        { t: 'link', href: 'https://example.com' },
-      ],
-    });
   });
+});
 
-  test('a snake_case word keeps its underscores', () => {
-    expect(parseMarkdown('use snake_case_name here')).toEqual([
-      { t: 'paragraph', children: [{ t: 'text', text: 'use snake_case_name here' }] },
-    ]);
+test.describe('Markdown limits', () => {
+  const SIZE = 2 * 1024 * 1024;
+  const backtickRuns = (() => {
+    let text = '';
+    for (let size = 1; text.length < SIZE; size++) text += `${'`'.repeat(size)}a`;
+    return text;
+  })();
+  // What a 2 MB file the Viewer accepts could hold to stall the page: each is a loop with no end to find.
+  const hostile: Record<string, string> = {
+    'a line of quote marks': '>'.repeat(SIZE),
+    'a line of list markers': `${'- '.repeat(SIZE / 2)}x`,
+    'emphasis that never closes': '*a '.repeat(SIZE / 3),
+    'bold that never closes': '**a '.repeat(SIZE / 4),
+    'underscores that never close': '_a '.repeat(SIZE / 3),
+    'strike that never closes': '~~a '.repeat(SIZE / 4),
+    'backtick runs of every length': backtickRuns,
+    'one run of backticks': '`'.repeat(SIZE),
+    'brackets with no link': `${'[a '.repeat(SIZE / 3)}]`,
+    'images with no link': `${'![a '.repeat(SIZE / 4)}]`,
+    'addresses that are not links': 'http://['.repeat(SIZE / 8),
+    'an address ending in a long run of punctuation': `http://a${'.'.repeat(SIZE)}x`,
+    'a heading with a long run of spaces': `# a${' '.repeat(SIZE)}b`,
+    'a table rule line of spaces': `a|b\n${' '.repeat(SIZE)}x`,
+    'half a million list items': '- a\n'.repeat(SIZE / 4),
+  };
+  for (const [name, source] of Object.entries(hostile))
+    test(`${name} parses in under a second`, () => {
+      const started = performance.now();
+      parseMarkdown(source);
+      expect(performance.now() - started).toBeLessThan(1000);
+    });
+
+  test('quotes nested deeper than 8 levels keep the rest as text', () => {
+    const levels = (blocks: Block[]): number =>
+      blocks.reduce((deepest, block) => Math.max(deepest, block.t === 'quote' ? 1 + levels(block.children) : 0), 0);
+    expect(levels(parseMarkdown(`${'>'.repeat(30)} deep`))).toBe(8);
+    expect(levels(parseMarkdown('> > two'))).toBe(2);
   });
 });

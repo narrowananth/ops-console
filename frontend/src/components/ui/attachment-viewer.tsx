@@ -7,7 +7,7 @@ import { CodeBlock } from './code-block';
 import { DiagramView } from './viewer/diagram-view';
 import { asOpsResult, parseJson } from './viewer/json';
 import { JsonTree } from './viewer/json-tree';
-import { DRAWN, RENDER_LIMIT, TEXT_SHOWN, viewKind } from './viewer/kinds';
+import { DRAWN, PARSED, RENDER_LIMIT, TEXT_SHOWN, viewKind } from './viewer/kinds';
 import { MarkdownView } from './viewer/markdown-view';
 import { TableView } from './viewer/table-view';
 
@@ -127,7 +127,8 @@ export function AttachmentViewer({ viewed, onClose }: { viewed: Viewed; onClose:
     (cut ? blob.slice(0, TEXT_SHOWN) : blob).text().then(setText, () => setError('The file could not be read.'));
   }, [blob, cut, readable]);
 
-  const drawn = !cut && kind !== null && DRAWN.has(kind);
+  // HTML and SVG draw from the file itself, whatever its size; only the types the page parses need it whole.
+  const drawn = kind !== null && DRAWN.has(kind) && !(cut && PARSED.has(kind));
   const source = view === 'source' || !drawn;
   const note = cut ? '\n… the rest is cut here. Download shows all of it.' : undefined;
   return (

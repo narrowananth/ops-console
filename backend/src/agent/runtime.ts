@@ -1241,7 +1241,7 @@ export class AgentRuntime implements OnModuleDestroy {
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
     const logSource = this.logSourceOf(session.alertId);
-    const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined, logSource);
+    const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined && session.prAction === null, logSource);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {

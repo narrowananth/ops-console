@@ -1,4 +1,4 @@
-/** A file larger than this shows its first `TEXT_SHOWN` bytes as source, never drawn. */
+/** A parsed file (`PARSED`) larger than this shows its first `TEXT_SHOWN` bytes as source, never drawn. */
 export const RENDER_LIMIT = 2 * 1024 * 1024;
 export const TEXT_SHOWN = 256 * 1024;
 
@@ -46,18 +46,11 @@ export function viewKind(type: string, name: string): ViewKind {
   return 'other';
 }
 
-/** Kinds with a drawn view and a Source toggle. */
-export const DRAWN: ReadonlySet<ViewKind> = new Set([
-  'markdown',
-  'json',
-  'jsonl',
-  'csv',
-  'tsv',
-  'mermaid',
-  'dot',
-  'html',
-  'svg',
-]);
+/** Kinds the Viewer reads as text and parses to draw them, so a size limit applies. */
+export const PARSED: ReadonlySet<ViewKind> = new Set(['markdown', 'json', 'jsonl', 'csv', 'tsv', 'mermaid', 'dot']);
+
+/** Kinds with a drawn view and a Source toggle: the parsed ones, and HTML and SVG, which the browser draws at any size. */
+export const DRAWN: ReadonlySet<ViewKind> = new Set([...PARSED, 'html', 'svg']);
 
 const BLOCK_EXTENSION: Record<string, string> = {
   json: 'json',

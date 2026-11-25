@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { AccessLevel, ConnectionEnv, ErrorCode, RunPurpose, type SessionPatch } from '@ops-console/shared';
 import { eq, sql } from 'drizzle-orm';
-import { ApiError } from '../common/errors';
+import { ApiError, validationFailed } from '../common/errors';
 import { connections, sessionConnections } from '../db/schema';
 import { STORE, type Store } from '../db/store';
 import type { SessionKindHandler } from './session-kinds';
@@ -99,16 +99,22 @@ export function scopedConnections(
   emptyMeans: 'all' | 'none',
 ): Pick<SessionKindHandler, 'view' | 'patch' | 'deniedServers' | 'serverLabel' | 'connectionsNote'> {
   return {
-    view: (session) => ({ connection_ids: scopes.ids(session.id) }),
+    view: (session) => ({ connection_ids: session.prAction === null ? scopes.ids(session.id) : null }),
     patch: (session: SessionRow, patch: SessionPatch) => {
       if (patch.connection_ids === undefined) return;
+      // Only the operator's own chat uses a scope, and a PR Session's runs are buttons.
+      if (session.prAction !== null) throw validationFailed('invalid body: connection_ids');
       const ids = [...new Set(patch.connection_ids)];
       scopes.check(ids);
       scopes.set(session.id, ids);
     },
-    deniedServers: (session, purpose) => (purpose === RunPurpose.Chat ? scopes.denied(session.id, emptyMeans) : []),
+    // A PR Session has no scope: its runs start no Connection (`mcpScope`) and get no note.
+    deniedServers: (session, purpose) =>
+      purpose === RunPurpose.Chat && session.prAction === null ? scopes.denied(session.id, emptyMeans) : [],
     serverLabel: (server) => scopes.label(server),
     // Dev tools has its own instructions for every Connection it has.
-    ...(emptyMeans === 'none' ? { connectionsNote: (session: SessionRow) => scopes.note(session.id) } : {}),
+    ...(emptyMeans === 'none'
+      ? { connectionsNote: (session: SessionRow) => (session.prAction === null ? scopes.note(session.id) : null) }
+      : {}),
   };
 }

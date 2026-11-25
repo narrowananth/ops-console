@@ -1,4 +1,5 @@
 import { AccessLevel, type Connection, type Session } from '@ops-console/shared';
+import { useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DatabaseIcon } from '../components/ui/icons';
 import { menu } from '../components/ui/item';
@@ -27,12 +28,24 @@ export function SessionConnections({ session }: { session: Session }) {
   const navigate = useNavigate();
   const { trigger, open, place, close, toggle } = useAnchoredMenu('data-session-connections');
   const picked = useScopedConnections(session);
-  if (session.connection_ids === null) return null;
+  // Each click builds on the last list asked for while an earlier one is still being saved, so quick clicks all stick.
+  const asked = useRef({ pending: 0, ids: [] as string[] });
+  const scope = session.connection_ids;
+  if (scope === null) return null;
   const ids = picked.map((connection) => connection.id);
   const choice = picked.length === 0 ? 'none' : picked.map((connection) => connection.name).join(', ');
   const all = connections.data?.data ?? [];
-  const flip = (id: string) =>
-    update.mutate({ connection_ids: ids.includes(id) ? ids.filter((one) => one !== id) : [...ids, id] });
+  const flip = (id: string) => {
+    const base = asked.current.pending > 0 ? asked.current.ids : scope;
+    const next = base.includes(id) ? base.filter((one) => one !== id) : [...base, id];
+    asked.current = { pending: asked.current.pending + 1, ids: next };
+    update
+      .mutateAsync({ connection_ids: next })
+      .catch(() => {}) // `useUpdateSession` refetches on failure
+      .finally(() => {
+        asked.current.pending -= 1;
+      });
+  };
 
   return (
     <div className="relative flex-none">

@@ -1,13 +1,13 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ConnectionEnv, RunPurpose, SessionKind } from '@ops-console/shared';
+import { ConnectionEnv, PrAction, RunPurpose, SessionKind } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AgentRuntime } from '../src/agent/runtime';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
-import { connections } from '../src/db/schema';
+import { connections, sessionConnections, sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { DevtoolsModule } from '../src/devtools/devtools.module';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
@@ -104,6 +104,20 @@ async function ask(daemon: AgentDaemon, sessionId: string, ...steps: Parameters<
   );
 }
 
+/** Imports a Repo with one commit on `main`; returns its id. */
+async function importRepo(daemon: AgentDaemon): Promise<string> {
+  const dir = path.join(await realpath(await tempDir('ops-console-git-')), 'orders-api');
+  await mkdir(dir, { recursive: true });
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: dir });
+  git('init', '-q', '-b', 'main');
+  await writeFile(path.join(dir, 'README.md'), 'hello\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  git('remote', 'add', 'origin', 'git@github.com:acme/orders-api.git');
+  return (await api(daemon).post('/repos', { path: dir })).body.data.id as string;
+}
+
 describe('scope API', () => {
   it('starts a Session with an empty scope and stores a chosen one, surviving a reload', async () => {
     const daemon = await start();
@@ -159,6 +173,18 @@ describe('scope API', () => {
     expect((await api(daemon).get(`/sessions/${a.id}`)).body.data.connection_ids).toEqual([]);
   });
 
+  it('leaves the scope as it was when another field of the same PATCH is refused', async () => {
+    const daemon = await start();
+    const mongo = await connect(daemon, MONGO_PROD);
+    const made = await newSession(daemon);
+    const refused = await api(daemon).patch(`/sessions/${made.id}`, {
+      connection_ids: [mongo.id],
+      extra_repo_ids: ['nope'],
+    });
+    expect([refused.status, refused.body.error.code]).toEqual([404, 'not_found']);
+    expect((await api(daemon).get(`/sessions/${made.id}`)).body.data.connection_ids).toEqual([]);
+  });
+
   it('answers validation_failed for a kind with no scope, and keeps null on it', async () => {
     const daemon = await start();
     const review = daemon.createSession({ kind: SessionKind.PrReview });
@@ -193,16 +219,7 @@ describe('a repo Session', () => {
     const daemon = await start();
     const mongo = await connect(daemon, MONGO_PROD);
     const pg = await connect(daemon, PG_STAGING);
-    const dir = path.join(await realpath(await tempDir('ops-console-git-')), 'orders-api');
-    await mkdir(dir, { recursive: true });
-    const git = (...args: string[]) =>
-      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: dir });
-    git('init', '-q', '-b', 'main');
-    await writeFile(path.join(dir, 'README.md'), 'hello\n');
-    git('add', '.');
-    git('commit', '-q', '-m', 'first');
-    git('remote', 'add', 'origin', 'git@github.com:acme/orders-api.git');
-    const repo = (await api(daemon).post('/repos', { path: dir })).body.data.id as string;
+    const repo = await importRepo(daemon);
 
     const created = await api(daemon).post('/sessions', {
       repo_id: repo,
@@ -219,6 +236,29 @@ describe('a repo Session', () => {
     expect(patched.body.data.connection_ids).toEqual([pg.id]);
     await ask(daemon, created.body.data.id, { text: 'two' });
     expect(denied(daemon)).toEqual(['mongo-prod']);
+  });
+});
+
+describe('a PR Session', () => {
+  it('has no Connection scope: its runs reach no Connection, get no note, and refuse PATCH connection_ids', async () => {
+    const daemon = await start();
+    const mongo = await connect(daemon, MONGO_PROD);
+    await connect(daemon, PG_STAGING);
+    const repo = await importRepo(daemon);
+    const made = await api(daemon).post('/sessions', { repo_id: repo, branch: 'main', access_mode: 'full' });
+    const id = made.body.data.id as string;
+    // A scope ticked before the Session became a PR Session's, or by any other route than the API.
+    const store = daemon.app.get<Store>(STORE);
+    store.write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, id)).run();
+      tx.insert(sessionConnections).values({ sessionId: id, connectionId: mongo.id }).run();
+    });
+    await ask(daemon, id, { text: 'ok' });
+    expect(denied(daemon)).toEqual(['mongo-prod', 'pg-staging']);
+    expect(append(daemon)).not.toContain('ops-result');
+    expect(append(daemon)).not.toContain('mongo-prod');
+    const patched = await api(daemon).patch(`/sessions/${id}`, { connection_ids: [mongo.id] });
+    expect([patched.status, patched.body.error.code]).toEqual([400, 'validation_failed']);
   });
 });
 

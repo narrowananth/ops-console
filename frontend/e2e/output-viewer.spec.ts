@@ -13,7 +13,7 @@ type Served = { body: string; modified_at?: string };
 const REPORT = [
   '# Weekly report',
   '',
-  'Totals went **up**, *slightly*, and ~~one~~ item is [documented](https://example.com/docs) or [unsafe](javascript:alert(1)).',
+  'Totals went **up**, *slightly*, and ~~one~~ item is [documented](https://example.com/docs) or [unsafe](javascript:alert(1)). Names like snake_case_name stay as written.',
   '',
   '- [x] ship the viewer',
   '- [ ] write the docs',
@@ -69,6 +69,7 @@ const FILES: Record<string, Served> = {
   'page.html': { body: '<h1>Page</h1><script>window.parent.__ran = 1</script>', modified_at: T1 },
   'huge.log': { body: `${'x'.repeat(300 * 1024)}END`, modified_at: T1 },
   'huge.json': { body: JSON.stringify({ pad: 'y'.repeat(2 * 1024 * 1024 + 10) }), modified_at: T1 },
+  'huge.html': { body: `<h1>Big page</h1><!-- ${'z'.repeat(2 * 1024 * 1024 + 10)} -->`, modified_at: T1 },
   'later.txt': { body: 'later', modified_at: T2 },
 };
 
@@ -227,6 +228,8 @@ test('Markdown draws as elements, shows raw HTML as text, loads no image and dro
   const viewer = page.getByRole('dialog', { name: 'report.md' });
   await expect(viewer.getByRole('heading', { name: 'Weekly report' })).toBeVisible();
   await expect(viewer.getByRole('strong')).toHaveText('up');
+  await expect(viewer.locator('em')).toHaveText('slightly');
+  await expect(viewer).toContainText('snake_case_name');
   await expect(viewer.getByRole('checkbox', { name: 'Done', exact: true })).toBeChecked();
   await expect(viewer.getByRole('checkbox', { name: 'Not done' })).not.toBeChecked();
   await expect(viewer.getByRole('cell', { name: '/orders' })).toBeVisible();
@@ -366,31 +369,31 @@ test('Mermaid and Graphviz draw as an image, with zoom, and a bad source shows t
   await expect(badDot.locator('pre')).toContainText('digraph G { api -> }');
 });
 
-test('the drawing code loads only when a Mermaid or Graphviz file opens', async ({ page }) => {
-  const scripts: string[] = [];
+test('the drawing code loads only when a Mermaid or Graphviz file opens, each with its own', async ({ page }) => {
+  const loaded: string[] = [];
   page.on('request', (request) => {
-    if (request.resourceType() === 'script' || request.url().endsWith('.wasm')) scripts.push(request.url());
+    if (request.resourceType() === 'script' || request.url().endsWith('.wasm')) loaded.push(request.url());
   });
   await open(page);
-  // The page, a Markdown, JSON and CSV file and a code block open with none of it.
+  await page.waitForLoadState('networkidle');
+  const initial = loaded.length;
+  // A Markdown, JSON and CSV file open with no code beyond the page's own.
   for (const name of ['report.md', 'data.json', 'sales.csv']) {
     await chip(page, name).click();
     await expect(page.getByRole('dialog', { name })).toBeVisible();
     await page.keyboard.press('Escape');
   }
-  const drawing = /mermaid|viz|cytoscape|elk/i;
-  expect(scripts.filter((url) => drawing.test(url))).toEqual([]);
-  const before = scripts.length;
+  await page.waitForLoadState('networkidle');
+  expect(loaded.slice(initial)).toEqual([]);
   await chip(page, 'flow.mmd').click();
   await expect(page.getByRole('dialog', { name: 'flow.mmd' }).getByRole('img', { name: 'flow.mmd' })).toBeVisible();
-  // Mermaid's own chunks come in when its file opens, and Graphviz's still stay out.
-  expect(scripts.filter((url) => /mermaid/i.test(url)).length).toBeGreaterThan(0);
-  expect(scripts.length).toBeGreaterThan(before + 3);
-  expect(scripts.filter((url) => /viz/i.test(url))).toEqual([]);
+  const afterMermaid = loaded.length;
+  expect(afterMermaid).toBeGreaterThan(initial);
   await page.keyboard.press('Escape');
+  // Graphviz's code was not in Mermaid's: it comes in when its file opens.
   await chip(page, 'graph.dot').click();
   await expect(page.getByRole('dialog', { name: 'graph.dot' }).getByRole('img', { name: 'graph.dot' })).toBeVisible();
-  expect(scripts.filter((url) => /viz/i.test(url)).length).toBeGreaterThan(0);
+  expect(loaded.length).toBeGreaterThan(afterMermaid);
 });
 
 test('HTML stays in a frame with no allow token and runs no script', async ({ page }) => {
@@ -421,6 +424,16 @@ test('a file over 2 MB, and other text over 256 KB, show their first 256 KB as s
   const log = page.getByRole('dialog', { name: 'huge.log' });
   await expect(log.locator('pre')).toContainText('the rest is cut here');
   await expect(log.locator('pre')).not.toContainText('END');
+});
+
+test('an HTML file over 2 MB still draws in its frame, and its source is cut', async ({ page }) => {
+  await open(page);
+  await chip(page, 'huge.html').click();
+  const viewer = page.getByRole('dialog', { name: 'huge.html' });
+  await expect(viewer.locator('iframe')).toHaveAttribute('sandbox', '');
+  await expect(viewer.frameLocator('iframe').getByRole('heading', { name: 'Big page' })).toBeVisible();
+  await viewer.getByRole('button', { name: 'Source' }).click();
+  await expect(viewer.locator('pre')).toContainText('the rest is cut here');
 });
 
 test('a file that is gone shows the error line', async ({ page }) => {

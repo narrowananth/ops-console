@@ -56,8 +56,11 @@ const session = (ids: string[]) => ({
   subagents: [],
 });
 
-/** The daemon as one Session sees it: a PATCH of `connection_ids` is kept and read back. */
-async function route(page: Page, connections: unknown[]) {
+/**
+ * The daemon as one Session sees it: a PATCH of `connection_ids` is kept and read back. `saveMs[n]` is how long the
+ * n-th PATCH takes to answer, and an answer holds the list that PATCH sent.
+ */
+async function route(page: Page, connections: unknown[], saveMs: number[] = []) {
   let ids: string[] = [];
   const patches: unknown[] = [];
   await page.route('**/api/connections', (route) =>
@@ -70,12 +73,13 @@ async function route(page: Page, connections: unknown[]) {
     return route.fulfill({ json: { data: kind === 'repo' ? [] : [session(ids)] } });
   });
   await page.route(/\/api\/sessions\/s1\/messages$/, (route) => route.fulfill({ json: { data: [] } }));
-  await page.route(/\/api\/sessions\/s1$/, (route) => {
+  await page.route(/\/api\/sessions\/s1$/, async (route) => {
     if (route.request().method() !== 'PATCH') return route.fulfill({ json: { data: session(ids) } });
     const body = route.request().postDataJSON() as { connection_ids: string[] };
     patches.push(body);
     ids = body.connection_ids;
-    return route.fulfill({ json: { data: session(ids) } });
+    await new Promise((resolve) => setTimeout(resolve, saveMs[patches.length - 1] ?? 0));
+    return route.fulfill({ json: { data: session(body.connection_ids) } });
   });
   return patches;
 }
@@ -118,4 +122,21 @@ test('with no Connections the menu says so and links to Connections', async ({ p
   await expect(page.getByText('No Connections yet.')).toBeVisible();
   await page.getByRole('button', { name: 'Add one in Connections' }).click();
   await expect(page).toHaveURL(/\/connections/);
+});
+
+test('ticks made while an earlier one is still being saved all stick', async ({ page }) => {
+  const patches = await route(page, CONNECTIONS, [300, 900]);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
+  await page.getByRole('button', { name: 'Connections: none' }).click();
+  const menu = page.locator('[data-session-connections]');
+  await menu.getByRole('button', { name: /mongo-prod/ }).click();
+  await menu.getByRole('button', { name: 'pg-tenant' }).click();
+  // The first save answers while the second is still going, then the operator unticks the first Connection.
+  await page.waitForResponse((response) => response.request().method() === 'PATCH');
+  await page.waitForTimeout(100);
+  await menu.getByRole('button', { name: /mongo-prod/ }).click();
+  await expect
+    .poll(() => patches)
+    .toEqual([{ connection_ids: ['c1'] }, { connection_ids: ['c1', 'c2'] }, { connection_ids: ['c2'] }]);
+  await expect(page.getByRole('button', { name: 'Connections: pg-tenant' })).toContainText('1');
 });
