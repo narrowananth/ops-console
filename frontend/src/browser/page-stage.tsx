@@ -335,10 +335,13 @@ export function PageStage({
           event.preventDefault();
           if (paste === 'clipboard') {
             // A Mac's Control+V fires no paste event, so the clipboard is read by hand.
-            void navigator.clipboard.readText().then(
-              (text) => sendPaste(text, []),
-              () => setNotice('The browser did not allow reading the clipboard.'),
-            );
+            // `navigator.clipboard` is missing off a secure origin, which throws before any promise exists.
+            void Promise.resolve()
+              .then(() => navigator.clipboard.readText())
+              .then(
+                (text) => sendPaste(text, []),
+                () => setNotice('The browser did not allow reading the clipboard.'),
+              );
             return;
           }
           send(keyMessage('down', event.nativeEvent, onMac()));
