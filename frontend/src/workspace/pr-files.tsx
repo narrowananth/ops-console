@@ -1,5 +1,5 @@
 import type { PrFile, PullRequestDetail } from '@ops-console/shared';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { DiffStat } from '../components/ui/diff';
 import { useStored } from '../lib/remember';
@@ -213,20 +213,23 @@ function FileTree({
           entry.kind === 'folder' ? (
             <li
               key={entry.path}
-              style={{ paddingLeft: 8 + entry.depth * 14 }}
-              className="truncate py-0.5 text-neutral-600"
+              style={{ ...guides(entry.depth), paddingLeft: 8 + entry.depth * 14 }}
+              className="flex items-center gap-1 truncate py-1 text-neutral-600"
             >
-              ▾ {entry.name}
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden className="flex-none">
+                <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+              <span className="truncate">{entry.name}</span>
             </li>
           ) : (
-            <li key={entry.file.name}>
+            <li key={entry.file.name} style={guides(entry.depth)} className="flow-root">
               <button
                 type="button"
                 aria-current={active === entry.file.name}
                 title={entry.file.name}
                 onClick={() => onPick(entry.file)}
                 style={{ paddingLeft: 8 + entry.depth * 14 }}
-                className={`flex w-full cursor-pointer items-center gap-1.5 rounded-md border-0 py-0.5 pr-2 text-left text-[12.5px] text-text ${active === entry.file.name ? 'bg-card font-semibold shadow-sm' : 'bg-transparent hover:bg-neutral-200'}`}
+                className={`my-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md border-0 py-0.5 pr-2 text-left text-[12.5px] text-text ${active === entry.file.name ? 'bg-card font-semibold shadow-sm' : 'bg-transparent hover:bg-neutral-200'}`}
               >
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {unresolved(entry.file.name) > 0 && (
@@ -248,6 +251,20 @@ function FileTree({
       </ul>
     </nav>
   );
+}
+
+/**
+ * A vertical guide line for each level of folder above a row, under the middle of that folder's chevron. The rows
+ * stay flush, so the lines run unbroken down the tree while the buttons inside them keep their gap.
+ */
+function guides(depth: number): CSSProperties {
+  if (depth === 0) return {};
+  return {
+    backgroundImage: 'repeating-linear-gradient(90deg, var(--color-divider) 0 1px, transparent 1px 14px)',
+    backgroundSize: `${depth * 14}px 100%`,
+    backgroundPosition: '12px 0',
+    backgroundRepeat: 'no-repeat',
+  };
 }
 
 /**

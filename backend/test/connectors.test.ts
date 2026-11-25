@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { CONNECTOR_ORDER, ConnectorId, ErrorCode, HealthStatus, type WsEvent } from '@ops-console/shared';
+import { CONNECTOR_ORDER, ConnectorId, ErrorCode, HealthStatus, McpTransport, type WsEvent } from '@ops-console/shared';
 import Database from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -510,6 +510,41 @@ describe('connecting', () => {
     await api(ctx.daemon).delete('/connectors/jira/credentials');
     await ctx.daemon.app.get(McpServersService).settled();
     expect(await server()).toMatchObject({ registered: false });
+  });
+
+  it('registers the Atlassian server at its v2 address, and moves a v1 registration there when Jira connects again (Behavior 9, 10)', async () => {
+    const ctx = await start();
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'atlassian', { status: 'needs-auth' });
+    const atlassianUrls = () =>
+      ctx.dirs.map((dir) => {
+        const file = path.join(dir, '.claude.json');
+        return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')).mcpServers?.atlassian?.url : undefined;
+      });
+    const mcp = ctx.daemon.app.get(McpServersService);
+    // Registered before Atlassian's v2, as an operator who connected Jira last month has it.
+    await mcp.ensureRegistered({
+      name: 'atlassian',
+      transport: McpTransport.Http,
+      target: 'https://mcp.atlassian.com/v1/mcp',
+    });
+    expect(atlassianUrls().filter(Boolean)).not.toEqual([]);
+    for (const url of atlassianUrls().filter(Boolean)) expect(url).toBe('https://mcp.atlassian.com/v1/mcp');
+
+    await api(ctx.daemon).post('/connectors/jira/connect', {});
+    await until(
+      () => atlassianUrls().filter(Boolean),
+      (urls) => urls.length > 0 && urls.every((url) => url === 'https://mcp.atlassian.com/v2/mcp'),
+      'the server at the v2 address',
+    );
+  });
+
+  it('leaves a registration at the current address alone, a closing slash aside (Behavior 10)', async () => {
+    const ctx = await start();
+    const mcp = ctx.daemon.app.get(McpServersService);
+    const spec = { name: 'atlassian', transport: McpTransport.Http, target: 'https://mcp.atlassian.com/v2/mcp' };
+    expect(await mcp.ensureRegistered(spec)).toBe(true);
+    expect(await mcp.ensureRegistered(spec)).toBe(false);
+    expect(await mcp.ensureRegistered({ ...spec, target: `${spec.target}/` })).toBe(false);
   });
 
   it('leaves auth with the reason when the sign-in fails', async () => {

@@ -382,7 +382,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
     // A server registered before it had its OAuth app signs in with dynamic registration, which it refuses.
     const oauth = spec.oauth ?? null;
     const sameOAuth = previous.every((item) => JSON.stringify(item.entry.oauth) === JSON.stringify(oauth));
-    if (found?.registered && same && sameOAuth) return false;
+    // A hosted server moved to another address, as Atlassian's did from v1 to v2, registers again at the new one.
+    const sameAddress =
+      spec.transport !== McpTransport.Http ||
+      previous.every((item) => item.entry.url === null || trimSlash(item.entry.url) === trimSlash(spec.target));
+    if (found?.registered && same && sameOAuth && sameAddress) return false;
     await this.register(
       spec.name,
       McpScope.User,
@@ -1105,4 +1109,9 @@ function scrub(text: string, secrets: string[]): string {
   let out = text;
   for (const secret of secrets) if (secret !== '') out = out.split(secret).join('***');
   return out;
+}
+
+/** An address without its closing slash, so `https://host/mcp` and `https://host/mcp/` read as one. */
+function trimSlash(address: string): string {
+  return address.replace(/\/+$/, '');
 }

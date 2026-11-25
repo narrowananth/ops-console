@@ -1,9 +1,11 @@
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { item, menu } from '../components/ui/item';
 
 /**
- * A button that opens a floating menu under it, right edge to right edge. The menu floats over the page, so a panel
- * that clips its contents does not cut it; a scroll or a resize closes it, as does Escape and a click outside.
+ * A button that opens a floating menu under it, right edge to right edge. The menu is drawn in the page body, so a
+ * panel that clips or contains its contents (`overflow`, `content-visibility`, a transform) neither cuts it nor moves
+ * it; a scroll or a resize closes it, as does Escape and a click outside.
  */
 export function MenuButton({
   label,
@@ -66,15 +68,6 @@ export function MenuButton({
 
   return (
     <div className={`relative flex-none ${className}`}>
-      {open && (
-        <button
-          type="button"
-          aria-hidden
-          tabIndex={-1}
-          className="fixed inset-0 z-50 cursor-default"
-          onClick={() => setPlace(null)}
-        />
-      )}
       <button
         ref={trigger}
         type="button"
@@ -92,17 +85,28 @@ export function MenuButton({
       >
         {children}
       </button>
-      {place && (
-        <div
-          role="menu"
-          aria-label={label}
-          data-menu-button
-          style={place}
-          className={`fixed z-51 max-w-[calc(100vw-16px)] overflow-auto ${menu} ${width}`}
-        >
-          {menuChildren(() => setPlace(null))}
-        </div>
-      )}
+      {place &&
+        createPortal(
+          <>
+            <button
+              type="button"
+              aria-hidden
+              tabIndex={-1}
+              className="fixed inset-0 z-50 cursor-default"
+              onClick={() => setPlace(null)}
+            />
+            <div
+              role="menu"
+              aria-label={label}
+              data-menu-button
+              style={place}
+              className={`fixed z-51 max-w-[calc(100vw-16px)] overflow-auto ${menu} ${width}`}
+            >
+              {menuChildren(() => setPlace(null))}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }

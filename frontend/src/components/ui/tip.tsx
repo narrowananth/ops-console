@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 /** How long the pointer rests on an element before its tip shows. Keyboard focus shows it at once. */
@@ -117,9 +117,9 @@ function Bubble({ text, target }: Shown) {
       id={TIP_ID}
       role="tooltip"
       style={place ?? { left: 0, top: 0, visibility: 'hidden' }}
-      className="pointer-events-none fixed z-[1000] max-w-72 rounded-md bg-text px-2.5 py-1.5 text-left font-body text-xs leading-snug font-normal whitespace-pre-line text-bg shadow-lg"
+      className="pointer-events-none fixed z-[1000] max-w-72 rounded-md bg-text px-2.5 py-1.5 text-left font-body text-xs leading-snug font-normal whitespace-pre-line text-bg shadow-lg [overflow-wrap:anywhere]"
     >
-      {text}
+      <Breakable text={text} />
     </div>
   );
 }
@@ -140,5 +140,25 @@ export function Hint({ text, label = 'What is this?' }: { text: string; label?: 
     >
       ?
     </span>
+  );
+}
+
+/** The text with a chance to break after each slash, so a long path wraps between its folders and not mid-name. */
+function Breakable({ text }: { text: string }) {
+  const parts = text.split('/');
+  return (
+    <>
+      {parts.map((part, at) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one text have no id
+        <Fragment key={at}>
+          {part}
+          {at < parts.length - 1 && (
+            <>
+              /<wbr />
+            </>
+          )}
+        </Fragment>
+      ))}
+    </>
   );
 }

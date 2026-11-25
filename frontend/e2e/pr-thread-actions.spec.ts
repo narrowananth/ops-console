@@ -739,7 +739,8 @@ test('the file tree shows each file’s +/− and unresolved threads, jumps to a
   await expect(tree.getByRole('button', { name: /^tax\.ts/ })).toContainText('1');
 
   // A folder that holds only one folder reads as one row.
-  await expect(tree.getByText('▾ lib/a/b')).toBeVisible();
+  await expect(tree.getByText('lib/a/b', { exact: true })).toBeVisible();
+  await expect(tree.getByText('lib/a', { exact: true })).toHaveCount(0);
   await tree.getByRole('button', { name: /^tax\.ts/ }).click();
   await expect(tree.getByRole('button', { name: /^tax\.ts/ })).toHaveAttribute('aria-current', 'true');
   await expect(page.getByRole('region', { name: 'src/tax.ts' })).toBeInViewport();
@@ -845,4 +846,160 @@ test('a comment of yours has a three-dot menu that deletes it after a confirmati
   await dialog.getByRole('button', { name: 'Delete' }).click();
   await expect.poll(() => deleted).toEqual(['c1r']);
   await expect(dialog).toHaveCount(0);
+});
+
+test('a comment’s three-dot menu opens in Files changed, wherever the file sits, and its Delete works (Behavior 4)', async ({
+  page,
+}) => {
+  const comments = COMMENTS.map((item) => (item.id === 'c1' ? { ...item, hunk: CART_HUNK } : item));
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX], comments }) });
+  const deleted: string[] = [];
+  await page.route('**/api/repos/r1/pull-requests/7/comments/*', (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    deleted.push(new URL(route.request().url()).pathname.split('/').pop() ?? '');
+    return route.fulfill({ status: 204, body: '' });
+  });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+
+  const mine = page
+    .getByRole('region', { name: 'Files' })
+    .getByRole('button', { name: 'More for this comment' })
+    .first();
+  await mine.click();
+  const menu = page.getByRole('menu', { name: 'More for this comment' });
+  await expect(menu).toBeVisible();
+  const item = menu.getByRole('menuitem', { name: 'Delete' });
+  await expect(item).toBeVisible();
+  // It sits under its button, on the screen, and is the topmost thing at its own centre: no panel covers it.
+  const box = await item.boundingBox();
+  const trigger = await mine.boundingBox();
+  expect(box && trigger).toBeTruthy();
+  if (!box || !trigger) return;
+  expect(box.y).toBeGreaterThanOrEqual(trigger.y);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()?.height ?? 0);
+  expect(
+    await item.evaluate(
+      (node) =>
+        node === document.elementFromPoint(node.getBoundingClientRect().x + 8, node.getBoundingClientRect().y + 8),
+    ),
+  ).toBe(true);
+  await item.click();
+  await page.getByRole('alertdialog', { name: 'Delete this comment?' }).getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => deleted).toEqual(['c1r']);
+});
+
+test('the file tree draws guide lines for each folder level and keeps its rows apart (Behavior 3, 5)', async ({
+  page,
+}) => {
+  const file = (name: string) => ({
+    name,
+    additions: 1,
+    deletions: 0,
+    lines: [
+      { sign: ' ' as const, text: '@@ -1 +1,2 @@' },
+      { sign: '+' as const, text: 'export const a = 1;' },
+    ],
+  });
+  const files = [file('README.md'), file('src/main/java/App.java'), file('src/main/java/Util.java')];
+  await routePullRequest(page, { current: pullRequest({ files, comments: [] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  const rowOf = (name: string) =>
+    tree.getByRole('listitem').filter({ has: page.getByRole('button', { name: new RegExp(`^${name}`) }) });
+  const guide = (name: string) => rowOf(name).evaluate((node) => getComputedStyle(node).backgroundImage);
+  // A file at the top has no guide; one three folders down has the lines.
+  expect(await guide('README.md')).toBe('none');
+  expect(await guide('App.java')).toContain('repeating-linear-gradient');
+  // A folder row has a chevron.
+  await expect(tree.getByRole('listitem').filter({ hasText: 'src/main/java' }).locator('svg')).toHaveCount(1);
+  // Neighbouring files are apart, so a selected shadow and a hovered row do not merge.
+  const [one, two] = [
+    await tree.getByRole('button', { name: /^App\.java/ }).boundingBox(),
+    await tree.getByRole('button', { name: /^Util\.java/ }).boundingBox(),
+  ];
+  expect(one && two).toBeTruthy();
+  if (!one || !two) return;
+  expect(two.y - (one.y + one.height)).toBeGreaterThanOrEqual(3);
+});
+
+test('a file’s tip wraps its path inside its bubble, between folders (Behavior 6)', async ({ page }) => {
+  const path = 'services/export/src/test/java/superfans/engage/export/ExportHarnessWithAVeryLongName.java';
+  const file = {
+    name: path,
+    additions: 1,
+    deletions: 0,
+    lines: [
+      { sign: ' ' as const, text: '@@ -1 +1,2 @@' },
+      { sign: '+' as const, text: 'export const a = 1;' },
+    ],
+  };
+  await routePullRequest(page, { current: pullRequest({ files: [file], comments: [] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+
+  await page
+    .getByRole('navigation', { name: 'Files in this pull request' })
+    .getByRole('button', { name: /^ExportHarness/ })
+    .hover();
+  const tip = page.getByRole('tooltip');
+  await expect(tip).toBeVisible();
+  await expect(tip).toContainText(path);
+  // Nothing runs past the bubble's edge, and it breaks at slashes, so it takes more than one line.
+  const fit = await tip.evaluate((node) => ({
+    overflow: node.scrollWidth - node.clientWidth,
+    height: node.getBoundingClientRect().height,
+  }));
+  expect(fit.overflow).toBeLessThanOrEqual(1);
+  expect(fit.height).toBeGreaterThan(40);
+});
+
+test('a comment box and a thread under a diff line are as wide as the visible diff, so their buttons show (Behavior 7, 8)', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1300, height: 800 });
+  const long = `const ${'veryLongIdentifier'.repeat(30)} = 1;`;
+  const file = {
+    name: 'src/wide.ts',
+    additions: 2,
+    deletions: 0,
+    lines: [
+      { sign: ' ' as const, text: '@@ -1 +1,3 @@' },
+      { sign: '+' as const, text: long },
+      { sign: '+' as const, text: 'const b = 2;' },
+    ],
+  };
+  const note = comment('w1', {
+    file_path: 'src/wide.ts',
+    line: 1,
+    body: `See \`${'someVeryLongInlineCode'.repeat(8)}\` and more words after it.`,
+  });
+  await routePullRequest(page, { current: pullRequest({ files: [file], comments: [note] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+
+  const scroller = page.getByRole('region', { name: 'Files' }).locator('div.overflow-x-auto:has(table)').first();
+  await expect(scroller).toBeVisible();
+  const view = await scroller.boundingBox();
+  expect(view).toBeTruthy();
+  if (!view) return;
+
+  // The thread card stays inside the visible diff, and what it says wraps in it.
+  const card = scroller.locator('td > div.sticky', { hasText: 'See ' });
+  const cardBox = await card.boundingBox();
+  expect(cardBox && cardBox.x + cardBox.width).toBeLessThanOrEqual(view.x + view.width + 1);
+  expect(await card.evaluate((node) => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+
+  // So does the comment box, with Cancel and Add comment inside the visible edge.
+  // The line's `+` shows on hover.
+  await page.getByText('const b = 2;').hover();
+  await page.getByRole('button', { name: 'Comment on line 2' }).click();
+  const add = page.getByRole('button', { name: 'Add comment' });
+  await expect(add).toBeVisible();
+  const addBox = await add.boundingBox();
+  expect(addBox && addBox.x + addBox.width).toBeLessThanOrEqual(view.x + view.width + 1);
+  const cancelBox = await page.getByRole('button', { name: 'Cancel' }).boundingBox();
+  expect(cancelBox && cancelBox.x + cancelBox.width).toBeLessThanOrEqual(view.x + view.width + 1);
 });
