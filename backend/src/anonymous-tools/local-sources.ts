@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { open, readdir, stat } from 'node:fs/promises';
+import { open, readdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -29,6 +29,33 @@ export function localPath(given: string): string {
   return path.resolve(home, given);
 }
 
+/** The login Keychain folder and the installed app: closed to a run's reads (ADR 0006), so closed here too. */
+const closedFolders = () => {
+  const home = os.homedir();
+  return [path.join(home, 'Library', 'Keychains'), path.join(home, '.ops-console')];
+};
+
+/** `realpath`, or the same path when nothing is there yet. */
+const resolved = (file: string) => realpath(file).catch(() => file);
+
+/**
+ * The path with its links resolved, refused when it is a closed folder or lies under one. The tools read what this
+ * returns, so a link swapped in after the check cannot lead in.
+ */
+async function openable(given: string): Promise<{ shown: string; real: string }> {
+  const shown = localPath(given);
+  const real = await resolved(shown);
+  for (const folder of closedFolders()) {
+    const closed = await resolved(folder);
+    if (real === closed || real.startsWith(closed + path.sep)) {
+      throw validationFailed(
+        `${shown} is closed to the agent: the login Keychain folder and the installed app are never read`,
+      );
+    }
+  }
+  return { shown, real };
+}
+
 function fileError(error: unknown, where: string): ApiError {
   const code = (error as NodeJS.ErrnoException).code;
   if (code === 'ENOENT') return new ApiError(404, ErrorCode.NotFound, `nothing at ${where}`);
@@ -43,9 +70,9 @@ function fileError(error: unknown, where: string): ApiError {
  * those keys lead to, pretty-printed so each field sits on its own line for the masking.
  */
 export async function readLocalFile(given: string, keep: Keep, pick?: string[]) {
-  const file = localPath(given);
+  const { shown: file, real } = await openable(given);
   try {
-    const handle = await open(file, 'r');
+    const handle = await open(real, 'r');
     try {
       const { size } = await handle.stat();
       const buffer = Buffer.alloc(Math.min(size, pick ? PICK_BYTES : READ_BYTES));
@@ -84,9 +111,9 @@ function picked(text: string, keys: string[], file: string): string {
 
 /** A folder's entries: name, kind and a file's size. */
 export async function listLocalDir(given: string) {
-  const dir = localPath(given);
+  const { shown: dir, real } = await openable(given);
   try {
-    const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+    const entries = (await readdir(real, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
     const listed = await Promise.all(
       entries.slice(0, DIR_ENTRIES).map(async (entry) => {
         const kind = entry.isDirectory()
@@ -97,7 +124,7 @@ export async function listLocalDir(given: string) {
               ? 'link'
               : 'other';
         const size = entry.isFile()
-          ? await stat(path.join(dir, entry.name)).then(
+          ? await stat(path.join(real, entry.name)).then(
               (s) => s.size,
               () => null,
             )

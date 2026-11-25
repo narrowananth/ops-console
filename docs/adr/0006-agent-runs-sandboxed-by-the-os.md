@@ -12,8 +12,12 @@ A build, a test run or a Testcontainers suite needs no switch and no list. Close
 - a read-only run's working folder and, for a Session's worktree, the Repo's git folder.
 
 The console sets the rules and leaves the profile to the SDK. It fails a run when the sandbox is unavailable, never runs
-a command the agent wrote outside it, and has no Setting to turn it off. One door leads out: the console's
-`run_integration` tool (below). A Session process (the Terminals dock) is no agent run
+a command the agent wrote outside it, and has no Setting to turn it off. Two doors lead out, both console tools that run in
+the daemon: `run_integration` (below), and the setup tools of an Anonymous Session. Those save Connections, register MCP
+Servers and Connectors, read the operator's Keychain, and read a local file or folder or a web page. Each that writes or
+reads a secret raises an Approval in every Access mode but full. The file and folder reads hold the same closed paths as
+commands (the Keychain folder and `~/.ops-console`, compared after links are resolved), and what they return has its
+secrets swapped for placeholders. A Session process (the Terminals dock) is no agent run
 and is not sandboxed; neither is the Session's browser page ([ADR 0007](0007-session-pages-and-processes-leave-the-sandbox.md)).
 
 The data folder, `~/.ssh`, `~/.aws` and `~/.config/gcloud` are readable to a run. The data folder holds `runtime.json`,
