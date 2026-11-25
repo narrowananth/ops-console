@@ -6,9 +6,9 @@
 browser (127.0.0.1:4545)        operator's Mac
 ┌────────────────────────┐  REST + WS   ┌─────────────────────────────────────────────────┐
 │ frontend/  React 18    │ ───────────▶ │ daemon: backend/ NestJS (127.0.0.1:4545)        │
-│ Operate: Monitor,      │ ◀─────────── │  serves the built UI, /api, /ws, and the        │
-│   Sessions, Pull       │              │  /browser /processes streams                    │
-│   requests, Dev tools  │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers     │
+│ Operate: Sessions,     │ ◀─────────── │  serves the built UI, /api, /ws, and the        │
+│   Pull requests,       │              │  /browser /processes streams                    │
+│   Monitor, Dev tools   │              │  agent ──▶ Claude Agent SDK ──▶ MCP servers     │
 │ Connect: Integrations, │              │  workspace ──▶ git · gh · glab · bkt            │
 │   Connections, Repos   │              │  monitor ──▶ pup · aws · Grafana · New Relic    │
 │                        │              │              · Log folder (OTLP files)          │

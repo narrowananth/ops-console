@@ -4,10 +4,7 @@ import type { ReactNode } from 'react';
 export const RAIL_BUTTON =
   'flex size-10 flex-none cursor-pointer items-center justify-center rounded-lg border-0 bg-transparent text-neutral-700 hover:bg-neutral-200 hover:text-text focus-visible:outline-2 focus-visible:outline-accent';
 
-/**
- * The arrow that folds a side panel to its rail, and opens it again. Beside a switch or a range picker it takes that
- * control's height and box, so the two read as one row.
- */
+/** The arrow that folds a side panel to its rail, and opens it again: 32 px open, 40 px on the rail, 18 px icon. */
 export function PanelToggle({
   open,
   onToggle,
@@ -25,7 +22,7 @@ export function PanelToggle({
       aria-expanded={open}
       title={label}
       onClick={onToggle}
-      className={`flex flex-none cursor-pointer items-center justify-center rounded-lg border-0 bg-neutral-200 text-neutral-700 hover:bg-neutral-300 hover:text-text focus-visible:outline-2 focus-visible:outline-accent ${open ? 'aspect-square self-stretch' : 'size-10'}`}
+      className={`flex flex-none cursor-pointer items-center justify-center rounded-lg border-0 bg-neutral-200 text-neutral-700 hover:bg-neutral-300 hover:text-text focus-visible:outline-2 focus-visible:outline-accent ${open ? 'size-8' : 'size-10'}`}
     >
       <PanelIcon open={open} />
     </button>
@@ -45,8 +42,8 @@ export function PanelRail({ label, children }: { label: string; children: ReactN
 export function PanelIcon({ open }: { open: boolean }) {
   return (
     <svg
-      width="16"
-      height="16"
+      width="18"
+      height="18"
       viewBox="0 0 16 16"
       fill="none"
       stroke="currentColor"

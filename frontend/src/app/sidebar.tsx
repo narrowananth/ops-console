@@ -76,7 +76,6 @@ const ICONS = {
       <path d="M6 8v8M18 10c0 4-6 3-10 7" />
     </>,
   ),
-  setup: icon(<path d="M4 17l6-5-6-5M12 19h8" />),
   agents: icon(
     <>
       <circle cx="12" cy="8" r="4" />
@@ -95,14 +94,13 @@ const ICONS = {
 
 /** Where every view lives, in sidebar order. */
 export const PAGES = [
-  { group: 'Operate', path: '/monitor', label: 'Monitor', icon: ICONS.monitor },
   { group: 'Operate', path: '/sessions', label: 'Sessions', icon: ICONS.sessions },
   { group: 'Operate', path: '/pull-requests', label: 'Pull requests', icon: ICONS.pullRequests },
+  { group: 'Operate', path: '/monitor', label: 'Monitor', icon: ICONS.monitor },
   { group: 'Operate', path: '/devtools', label: 'Dev tools', icon: ICONS.devtools },
   { group: 'Connect', path: '/integrations', label: 'Integrations', icon: ICONS.integrations },
   { group: 'Connect', path: '/connections', label: 'Connections', icon: ICONS.connections },
   { group: 'Connect', path: '/repos', label: 'Repos', icon: ICONS.repos },
-  { group: 'Connect', path: '/setup', label: 'Setup agent', icon: ICONS.setup },
   { group: 'Claude', path: '/agents', label: 'Accounts & Usage', icon: ICONS.agents },
   { group: 'Claude', path: '/agent-runs', label: 'Agent runs', icon: ICONS.runs },
   { group: 'Claude', path: '/playbooks', label: 'Playbooks', icon: ICONS.playbooks },
