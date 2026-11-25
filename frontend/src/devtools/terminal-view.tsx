@@ -15,7 +15,6 @@ import { ApprovalPrompts } from '../agents/approval-prompts';
 import { InlineText } from '../agents/inline-text';
 import { SessionChips, SettingsChips } from '../agents/session-chips';
 import { StopIcon } from '../agents/stop-run';
-import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Empty } from '../components/ui/empty';
 import { item } from '../components/ui/item';
 import { usePasteLimit } from '../lib/paste-limit';
@@ -31,7 +30,8 @@ import {
   useUpdateSession,
 } from '../lib/queries';
 import { ascending } from '../lib/sort';
-import { ACCESS_TIPS, PROD_TIP } from './fields';
+import { ConnectionRow } from './connection-row';
+import { ACCESS_TIPS } from './fields';
 import { ComparisonView, ResultView } from './result-tables';
 
 const ACCESS: Record<AccessLevel, string> = {
@@ -108,48 +108,15 @@ function SyncedTools({
       </div>
       {ascending(connections, (connection) => connection.name).map((connection) => {
         const on = scope.includes(connection.id);
-        const off = connection.access === AccessLevel.None;
         return (
-          <button
+          <ConnectionRow
             key={connection.id}
-            type="button"
-            aria-pressed={on}
-            disabled={off}
+            connection={connection}
+            on={on}
+            disabled={connection.access === AccessLevel.None}
             title={ACCESS[connection.access]}
-            onClick={() => onScope(on ? scope.filter((id) => id !== connection.id) : [...scope, connection.id])}
-            className={`flex w-full items-center gap-2.5 px-2.5 py-2 ${item(on)}`}
-          >
-            <span
-              aria-hidden
-              className={`flex size-4 flex-none items-center justify-center rounded-[5px] border transition-colors ${
-                on ? 'border-accent bg-accent text-white' : 'border-neutral-400 bg-card'
-              }`}
-            >
-              {on && (
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 12 12"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  aria-hidden
-                >
-                  <path d="m2.5 6 2.5 2.5 4.5-5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
-            </span>
-            <BrandIcon brand={CONNECTION_BRAND[connection.type]} size="sm" />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{connection.name}</span>
-            {connection.is_prod && (
-              <span
-                title={PROD_TIP}
-                className="rounded-full bg-accent-100 px-1.75 py-px text-xs font-semibold text-accent-700"
-              >
-                PROD
-              </span>
-            )}
-          </button>
+            onToggle={() => onScope(on ? scope.filter((id) => id !== connection.id) : [...scope, connection.id])}
+          />
         );
       })}
     </aside>

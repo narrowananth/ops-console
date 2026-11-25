@@ -40,7 +40,12 @@ export class SessionForks {
       kind.serverLabel,
     );
     if (forked === null) throw new ApiError(404, ErrorCode.NotFound, 'no such response in this session');
-    const common = { model: source.model, effort: source.effort, access_mode: source.accessMode };
+    const common = {
+      model: source.model,
+      effort: source.effort,
+      access_mode: source.accessMode,
+      connection_ids: kind.view?.(source).connection_ids ?? [],
+    };
     const created = await kind.create(
       source.kind === SessionKind.Repo
         ? { kind: SessionKind.Repo, repo_id: source.repoId, branch: source.branch, ...common }

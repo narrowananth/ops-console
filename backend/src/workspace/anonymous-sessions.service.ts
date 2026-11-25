@@ -12,8 +12,9 @@ import {
   SessionKind,
 } from '@ops-console/shared';
 import { ActionLogService } from '../action-log/action-log.service';
+import { ConnectionScopes, scopedConnections } from '../agent/connection-scopes';
 import { SessionKinds } from '../agent/session-kinds';
-import { type SessionRow, SessionsService, toSession } from '../agent/sessions.service';
+import { type SessionRow, SessionsService } from '../agent/sessions.service';
 import { DATA_DIR } from '../common/data-dir';
 import { ApiError, parseInput } from '../common/errors';
 import { GIT, Git, GitFailed } from '../repos/git';
@@ -32,6 +33,7 @@ export class AnonymousSessionsService {
     @Inject(GIT) private readonly git: Git,
     @Inject(SessionsService) private readonly sessions: SessionsService,
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
+    @Inject(ConnectionScopes) private readonly scopes: ConnectionScopes,
     @Inject(SessionKinds) kinds: SessionKinds,
   ) {
     kinds.register(SessionKind.Anonymous, {
@@ -46,10 +48,13 @@ export class AnonymousSessionsService {
       },
       create: (body) => this.create(parseInput(createAnonymousSessionSchema, body, 'body')),
       instructions: ANONYMOUS_INSTRUCTIONS,
+      ...scopedConnections(scopes, 'none'),
     });
   }
 
   create(input: Omit<CreateAnonymousSession, 'kind'>): Session {
+    const ids = [...new Set(input.connection_ids)];
+    this.scopes.check(ids);
     const row = this.sessions.create({
       kind: SessionKind.Anonymous,
       model: input.model,
@@ -57,7 +62,8 @@ export class AnonymousSessionsService {
       access_mode: input.access_mode,
     });
     this.folder(row.id);
-    return toSession(input.title ? this.sessions.write(row.id, { title: input.title }) : row, []);
+    this.scopes.set(row.id, ids);
+    return this.sessions.view(input.title ? this.sessions.write(row.id, { title: input.title }) : row);
   }
 
   /** The Session's folder, made when missing so a run always has somewhere to work. */

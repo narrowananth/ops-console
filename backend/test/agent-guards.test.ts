@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, ConnectorId, type LogSource, RunPurpose, SessionKind, type WsEvent } from '@ops-console/shared';
+import { AccessMode, ConnectorId, type LogSource, RunPurpose, type WsEvent } from '@ops-console/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mcpScope } from '../src/agent/mcp-scope';
 import { NEW_RELIC_QUERY_TOOL } from '../src/agent/new-relic-tool';
@@ -465,7 +465,7 @@ describe('CloudWatch Connector', () => {
 
 describe('Loki and New Relic MCP servers', () => {
   const kept = (purpose: RunPurpose, source: LogSource | null) => {
-    const scope = mcpScope(purpose, SessionKind.Repo, source);
+    const scope = mcpScope(purpose, false, source);
     return scope.none ? [] : ['grafana', 'newrelic'].filter((name) => !scope.withoutConnectors.includes(name));
   };
 

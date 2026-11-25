@@ -277,7 +277,7 @@ export const sessionSchema = z.object({
   pull_request: z.object({ number: z.number().int(), url: z.string() }).nullable(),
   /** `repo` Sessions: every pull request the console opened for the Session, on any branch of its Repo, newest first. */
   pull_requests: z.array(z.object({ number: z.number().int(), url: z.string(), branch: z.string() })),
-  /** `devtools` Sessions: the Connections the agent may reach; empty means every Connection with access. Null for other kinds. */
+  /** `devtools`, `repo` and `anonymous` Sessions: the Connections the agent may reach. Empty means every Connection with access in `devtools`, none in the others. Null for other kinds. */
   connection_ids: z.array(z.string()).nullable(),
   /** The Monitor Alert whose Verification or Fix runs in it; null for any other Session. */
   alert_id: z.string().nullable(),
@@ -457,7 +457,7 @@ export const sessionPatchSchema = z
     model: z.enum(Model).optional(),
     effort: z.enum(Effort).optional(),
     access_mode: z.enum(AccessMode).optional(),
-    /** `devtools` Sessions only. */
+    /** `devtools`, `repo` and `anonymous` Sessions only. */
     connection_ids: z.array(z.string().min(1)).optional(),
     /** The other Repos this Session's agent may write in; replaces the list. */
     extra_repo_ids: z.array(z.string().min(1)).max(50).optional(),

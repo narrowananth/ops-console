@@ -10,6 +10,7 @@ import {
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { isRunning, SUBAGENT_WORD, SubagentAvatar, WithSubagentCard } from '../agents/subagent-look';
+import { BrandIcon, CONNECTION_BRAND } from '../components/ui/brand-icon';
 import { Spinner } from '../components/ui/button';
 import { Elapsed } from '../components/ui/elapsed';
 import {
@@ -29,7 +30,9 @@ import {
   TrashIcon,
   VsCodeIcon,
 } from '../components/ui/icons';
+import { ProdTag } from '../devtools/connection-row';
 import { sessionPath } from './links';
+import { useScopedConnections } from './session-connections';
 
 const STATUS_DOT: Record<SubagentStatus, string> = {
   [SubagentStatus.Working]: 'bg-info',
@@ -428,6 +431,7 @@ export function SessionPanel({
   onClose: () => void;
 }) {
   const own = servers.filter((server) => server.session_id === session.id);
+  const scoped = useScopedConnections(session);
   const changed = diff && diff.files.length > 0 ? diff : null;
   const ordered = [...session.subagents].sort(
     (a, b) => Number(b.status === SubagentStatus.Working) - Number(a.status === SubagentStatus.Working),
@@ -559,6 +563,25 @@ export function SessionPanel({
                 </span>
               </Row>
             ))}
+          </Section>
+        )}
+        {scoped.length > 0 && (
+          <Section label="Connections">
+            <ul
+              aria-label="Connections the agent may reach"
+              className="m-0 flex list-none flex-wrap gap-1.5 p-0 px-3 pb-1"
+            >
+              {scoped.map((connection) => (
+                <li
+                  key={connection.id}
+                  className="flex items-center gap-1.5 rounded-full border border-line bg-card px-2 py-0.5 text-xs"
+                >
+                  <BrandIcon brand={CONNECTION_BRAND[connection.type]} size="sm" />
+                  <span className="font-mono">{connection.name}</span>
+                  {connection.is_prod && <ProdTag />}
+                </li>
+              ))}
+            </ul>
           </Section>
         )}
         {links && <Section>{links}</Section>}

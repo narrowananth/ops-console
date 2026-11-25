@@ -33,6 +33,7 @@ import type { Token } from './mentions';
 import { MessageEditor, type MessageEditorHandle } from './message-editor';
 import { type PastedText, PastedTextEditor } from './pasted-text-editor';
 import { PickedChips, useElementPicks } from './picked-elements';
+import { SessionConnections } from './session-connections';
 
 /** Whether the focus is in a place the operator types into. */
 const inField = (element: Element | null) =>
@@ -284,6 +285,7 @@ export function SessionComposer({
           <div className="flex flex-wrap items-center gap-1.5 px-3 pt-1 pb-3">
             <AttachButton onFiles={addFiles} />
             <ExtraRepos session={session} repos={repos} />
+            <SessionConnections session={session} />
             {send.isError && (
               <span role="alert" className="text-xs text-accent-700">
                 {send.error.message}

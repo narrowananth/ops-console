@@ -447,6 +447,10 @@ An outside service the operator signs in to, or a Log folder, an AWS profile, a 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.
 
+**Connection scope**:
+The Connections a Session's runs may reach. Empty reaches none in a `repo` or `anonymous` Session and every Connection with
+access in a Dev tools one. The operator ticks them in the composer; the agent cannot change it.
+
 **Result**:
 The rows one Connection gave for one Dev tools question, shown as a table under the Connection's name.
 

@@ -21,12 +21,12 @@ The operator wants to ask questions of their databases and queues in plain words
 8. A Connection in scope whose MCP server is down or needs a login is reported in a `step` part and skipped. The run goes on with the others.
 9. Deleting a Connection removes it from every scope. The Session stays.
 10. Two `devtools` Sessions run side by side.
-11. Only `devtools` Sessions carry a scope. Other kinds read `connection_ids: null`, and a `PATCH` that sets `connection_ids` on one answers `validation_failed`.
+11. `devtools`, `repo` and `anonymous` Sessions carry a scope (`session-connections`). Other kinds read `connection_ids: null`, and a `PATCH` that sets `connection_ids` on one answers `validation_failed`.
 
 ## Settled
 
 - **Session kind**: `devtools`, with no Repo (`07-workspace` enforces that in code).
-- **Scope**: stored in `session_connections`. Empty means every Connection with access.
+- **Scope**: stored in `session_connections`. Empty means every Connection with access in a `devtools` Session; in a `repo` or `anonymous` one it means none (`session-connections`).
 - **Agent work** (ADR 0005): every dev-tools question is an agent run. The console runs no query itself.
 - **Read by default**: a new Connection's Access Level is `read`; `write` takes an explicit change (`05-settings-dev-tools`).
 - **PROD-write rule**: this spec supplies the rule the agent runtime checks before every tool call. A tool call on a PROD Connection with Access Level `write` that the classifier does not know to be a read waits for an Approval. SQL (`execute_sql`, `run_query`) is a read only when every statement starts with `select`, `show`, `explain`, `describe`, `desc`, `values`, `table` or `with` and holds no write keyword, with comments and quoted text left out of the check; Mongo reads by tool name, with `aggregate` a write when it holds `$out` or `$merge`; Redis reads by tool name; Firebase reads by tool name (the get, list and query tools of its core, Realtime Database, Firestore and other services); Postgres's `search_objects` and ClickHouse's `list_databases` and `list_tables` read; any tool not known to read counts as a write. A `read` Connection asks nothing: its server is launched read-only and refuses the write.
@@ -79,11 +79,11 @@ Adds `connection_ids: ["uuid"]` for kind `devtools`, with optional `model`, `eff
 
 ### `PATCH /sessions/:id` (extends `02-settings-agents`)
 
-Adds `connection_ids` for a `devtools` Session. Applies to the next run, and sends `session.updated`. Errors: `connection_no_access`; `not_found` for an id no Connection has; `validation_failed` on any other kind.
+Adds `connection_ids` for a `devtools`, `repo` or `anonymous` Session. Applies to the next run, and sends `session.updated`. Errors: `connection_no_access`; `not_found` for an id no Connection has; `validation_failed` on any other kind.
 
 ### `Session` (extends `02-settings-agents`)
 
-Adds `connection_ids`: the scope for `devtools` Sessions, in the order the Connections were picked; `null` for other kinds.
+Adds `connection_ids`: the scope for `devtools`, `repo` and `anonymous` Sessions, in the order the Connections were picked; `null` for other kinds.
 
 Messages, `session.output`, `session.finished`, `approval.requested` and `action.logged` come from `02-settings-agents` unchanged.
 
