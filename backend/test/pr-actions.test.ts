@@ -105,6 +105,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(1),
     },
     {
@@ -115,6 +117,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(2),
     },
     {
@@ -125,6 +129,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: 'src/app.ts',
       line: 1,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(3),
     },
     {
@@ -135,6 +141,8 @@ async function start(author = 'octo-operator'): Promise<Ctx> {
       file_path: null,
       line: null,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: at(4),
     },
   ]);
@@ -219,7 +227,8 @@ describe('starting a PR action', () => {
     expect((await post({ action: 'address_comments' })).status).toBe(400);
     expect((await post({ action: 'address_comments', comment_ids: ['c2'] })).status).toBe(400);
     expect((await post({ action: 'address_comments', comment_ids: ['nope'] })).status).toBe(404);
-    expect((await post({ action: 'check_replies', comment_ids: ['c1'] })).status).toBe(400);
+    expect((await post({ action: 'check_replies', comment_ids: ['c3'] })).status).toBe(400);
+    expect((await post({ action: 'check_replies', comment_ids: [] })).status).toBe(400);
     expect((await post({ action: 'review', comment_ids: ['c1'] })).status).toBe(400);
     expect((await post({ action: 'check_replies', note: 'look here' })).status).toBe(400);
 
@@ -441,6 +450,34 @@ describe('Check replies', () => {
     // Once the reply is posted, the agent's comment is the thread's last: nothing is left to check.
     const again = await ctx.http.post(`${at(ctx)}/action-sessions`, { action: 'check_replies' });
     expect([again.status, again.body.error.code]).toEqual([409, 'invalid_state']);
+  });
+
+  it('checks only the threads named, when a thread asks for its own check', async () => {
+    const ctx = await start('colleague');
+    // c3 has a reply too, so a press with no ids would check both threads.
+    ctx.host.comments.set(1, [
+      ...(ctx.host.comments.get(1) ?? []),
+      {
+        id: 'c5',
+        parent_id: 'c3',
+        author: 'reviewer',
+        body: 'Done.',
+        file_path: 'src/app.ts',
+        line: 1,
+        resolved: false,
+        outdated: null,
+        hunk: null,
+        created_at: '2026-11-01T10:05:00.000Z',
+      },
+    ]);
+    const post = (body: Record<string, unknown>) => ctx.http.post(`${at(ctx)}/action-sessions`, body);
+    // A thread with no reply, and an id that is a reply, are refused.
+    expect((await post({ action: 'check_replies', comment_ids: ['c4'] })).status).toBe(400);
+    expect((await post({ action: 'check_replies', comment_ids: ['c2'] })).status).toBe(400);
+    expect((await press(ctx, { action: 'check_replies', comment_ids: ['c1'] })).status).toBe(201);
+    const prompt = ctx.daemon.sdk.calls[0]?.prompt;
+    expect(prompt).toContain('[comment_id c1]');
+    expect(prompt).not.toContain('[comment_id c3]');
   });
 
   it('leaves a not fixed thread open', async () => {

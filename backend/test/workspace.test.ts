@@ -962,6 +962,42 @@ describe('pull requests', () => {
     expect(notRoot.body.error.code).toBe('invalid_state');
   });
 
+  it('carries the host’s outdated flag and diff hunk on each comment of a pull request', async () => {
+    const ctx = await start();
+    ctx.host.prs = [hostPr(1)];
+    ctx.host.comments.set(1, [
+      {
+        id: 'c1',
+        parent_id: null,
+        author: 'reviewer',
+        body: 'Rename it.',
+        file_path: 'src/app.ts',
+        line: 3,
+        resolved: false,
+        outdated: true,
+        hunk: '@@ -1,2 +1,3 @@\n a\n+b',
+        created_at: '2026-11-01T10:00:00.000Z',
+      },
+      {
+        id: 'c2',
+        parent_id: null,
+        author: 'reviewer',
+        body: 'Nice.',
+        file_path: null,
+        line: null,
+        resolved: false,
+        outdated: null,
+        hunk: null,
+        created_at: '2026-11-01T10:01:00.000Z',
+      },
+    ]);
+    const { comments } = (await ctx.http.get(`/repos/${ctx.repoId}/pull-requests/1`)).body.data;
+    expect(comments).toMatchObject([
+      { id: 'c1', outdated: true, hunk: '@@ -1,2 +1,3 @@\n a\n+b' },
+      { id: 'c2', outdated: null, hunk: null },
+    ]);
+  });
+
   it("deletes the operator's and the agent's comments, and refuses anyone else's", async () => {
     const ctx = await start();
     ctx.host.prs = [hostPr(1)];
@@ -979,6 +1015,8 @@ describe('pull requests', () => {
         file_path: null,
         line: null,
         resolved: false,
+        outdated: null,
+        hunk: null,
         created_at: new Date().toISOString(),
       },
     ]);
@@ -1221,6 +1259,8 @@ describe('Agent Review', () => {
         file_path: 'src/app.ts',
         line: 3,
         resolved: false,
+        outdated: null,
+        hunk: null,
         created_at: '2026-11-01T10:00:00.000Z',
       },
     ]);

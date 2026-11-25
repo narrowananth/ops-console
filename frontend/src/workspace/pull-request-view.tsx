@@ -1,6 +1,7 @@
 import {
   PlaybookTrigger,
   PrAction,
+  PrActionState,
   PrMergeState,
   PrReviewEvent,
   PrReviewState,
@@ -11,25 +12,20 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { Button, Spinner } from '../components/ui/button';
-import { DiffStat } from '../components/ui/diff';
 import { Empty } from '../components/ui/empty';
 import { FoldTitle, useFold } from '../components/ui/fold';
 import { item, menu } from '../components/ui/item';
 import { Markdown } from '../components/ui/markdown';
-import {
-  useMergePullRequest,
-  usePostComment,
-  usePullRequest,
-  useReviewPullRequest,
-  useStartPrAction,
-} from '../lib/queries';
+import { useMergePullRequest, usePullRequest, useReviewPullRequest, useStartPrAction } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { useTriggerPlaybook } from '../playbooks/job-steps';
 import { withPlaybook } from '../playbooks/labels';
 import { AddressCommentsDialog } from './address-comments';
 import { AgentReviewDialog } from './agent-review-dialog';
 import { sessionPath } from './links';
-import { PrFileView, useViewed } from './pr-file';
+import { PrActivity } from './pr-activity';
+import { useViewed } from './pr-file';
+import { PrFiles } from './pr-files';
 import { ConflictBanner, PrCommits } from './pr-history';
 import {
   ADDRESS_TIP,
@@ -44,10 +40,7 @@ import { PrMeta, ToneMark } from './pr-meta';
 import { PrSessions } from './pr-sessions';
 import { ChecksSection, MergeChecksSection, PeopleSection, RailSection } from './pr-sidebar';
 import { CommitsIcon, FilesIcon, OverviewIcon, PrTabs } from './pr-tabs';
-import { CommentComposer, Thread } from './pr-thread';
-
-const FOLD_ALL =
-  'cursor-pointer rounded border-0 bg-transparent px-1.5 py-0.5 text-xs text-neutral-700 hover:bg-neutral-200 hover:text-text';
+import { type ThreadActions, ThreadActionsContext } from './pr-thread';
 
 export function PullRequestView({ repoId, number }: { repoId: string; number: number }) {
   const pull = usePullRequest(repoId, number);
@@ -83,25 +76,25 @@ function Loaded(props: {
   const [tab, setTab] = useStored('workspace.pr-tab', z.enum(['overview', 'files', 'commits']), 'overview');
   const [descriptionFolded, toggleDescription] = useFold('description');
   const viewed = useViewed(pr);
-  // Expand all or Collapse all, for this pull request only: another one opens with each file as it was left.
-  const [fold, setFold] = useState<{ pr: string; open: boolean } | null>(null);
-  const here = `${pr.repo_id}#${pr.number}`;
-  const bulk = fold?.pr === here ? fold : null;
-  const setBulk = ({ open }: { open: boolean }) => setFold({ pr: here, open });
   const reviewPlaybook = useTriggerPlaybook(PlaybookTrigger.ReviewPr);
   const addressPlaybook = useTriggerPlaybook(PlaybookTrigger.AddressComments);
   const checkPlaybook = useTriggerPlaybook(PlaybookTrigger.CheckReply);
-  const comment = usePostComment(pr.repo_id, pr.number);
   const reviewing = actionOpen(pr, PrAction.Review);
   const addressing = actionOpen(pr, PrAction.AddressComments);
   const checking = actionOpen(pr, PrAction.CheckReplies);
   // Its findings are already on the host; the next review waits for a new commit.
   const reviewed = pr.latest_agent_review !== null && !pr.latest_agent_review.stale;
-  const roots = pr.comments.filter((comment) => comment.parent_id === null);
   const open = pr.state === PrState.Open;
   const canAddress = open && openThreads(pr).length > 0;
   const replied = open ? repliedThreads(pr).length : 0;
   const error = review.error ?? merge.error ?? start.error;
+
+  // A thread's own buttons start a Round for that thread; they wait while the PR Session's turn runs.
+  const threadActions: ThreadActions = {
+    busy: pr.action_sessions.some((session) => session.state === PrActionState.Working),
+    starting: start.isPending ? (start.variables?.action ?? null) : null,
+    start: (action, commentId) => startAction({ action, comment_ids: [commentId] }),
+  };
 
   const BTN = 'px-3 py-1.5 text-xs';
   const approved = pr.review_state === PrReviewState.Approved;
@@ -207,63 +200,6 @@ function Loaded(props: {
     </div>
   );
 
-  const files = (
-    <section aria-label="Files" className="flex flex-col gap-2">
-      <div className="flex items-center gap-3 text-xs text-neutral-700">
-        <DiffStat
-          additions={pr.files.reduce((sum, file) => sum + file.additions, 0)}
-          deletions={pr.files.reduce((sum, file) => sum + file.deletions, 0)}
-        />
-        {pr.files.length > 1 && (
-          <span className="flex items-center gap-1">
-            <button
-              type="button"
-              title="Open every file on its lines"
-              onClick={() => setBulk({ open: true })}
-              className={FOLD_ALL}
-            >
-              Expand all
-            </button>
-            <button
-              type="button"
-              title="Fold every file to its name, to get to the comments and the end of the page"
-              onClick={() => setBulk({ open: false })}
-              className={FOLD_ALL}
-            >
-              Collapse all
-            </button>
-          </span>
-        )}
-        {pr.files.length > 0 && (
-          <span
-            title="Files you ticked Viewed, kept in this browser. A file whose change changes reads unviewed again."
-            className="ml-auto flex items-center gap-2"
-          >
-            <span className={viewed.count === pr.files.length ? 'font-semibold text-ok' : ''}>
-              {viewed.count} / {pr.files.length} viewed
-            </span>
-            <span aria-hidden className="h-1.5 w-20 overflow-hidden rounded-full bg-neutral-300">
-              <span
-                className="block h-full rounded-full bg-ok transition-[width]"
-                style={{ width: `${(viewed.count / pr.files.length) * 100}%` }}
-              />
-            </span>
-          </span>
-        )}
-      </div>
-      {pr.files.map((file) => (
-        <PrFileView
-          key={`${pr.head_sha}:${file.name}`}
-          pr={pr}
-          file={file}
-          viewed={viewed.isViewed(file)}
-          onViewed={(next) => viewed.set(file, next)}
-          bulk={bulk}
-        />
-      ))}
-    </section>
-  );
-
   const overview = (
     <>
       <ConflictBanner pr={pr} onOpenFile={openFile} />
@@ -283,36 +219,7 @@ function Loaded(props: {
         </div>
       </section>
 
-      <section aria-label="Comments" className="flex flex-col gap-3">
-        <h3 className="m-0 flex items-center gap-2 text-sm font-semibold">
-          Activity
-          <span className="text-xs font-normal text-neutral-700">
-            {pr.comments.length} {pr.comments.length === 1 ? 'comment' : 'comments'}
-          </span>
-        </h3>
-        <CommentComposer
-          label="Comment on the pull request"
-          draft={`${pr.repo_id}#${pr.number}.comment`}
-          placeholder="What do you want to say?"
-          submitLabel="Comment"
-          pending={comment.isPending}
-          error={comment.error}
-          onSubmit={(body, done) => comment.mutate({ body }, { onSuccess: done })}
-        />
-        {roots.length === 0 ? (
-          <div className="text-[13px] text-neutral-700">
-            No comments yet. Open Files changed, hover a line and press + to comment on it.
-          </div>
-        ) : (
-          <ul className="m-0 flex list-none flex-col gap-2 p-0">
-            {roots.map((root) => (
-              <li key={root.id}>
-                <Thread pr={pr} root={root} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <PrActivity pr={pr} />
     </>
   );
 
@@ -439,34 +346,41 @@ function Loaded(props: {
           />
         </div>
       </header>
-      <div className="flex min-h-0 flex-1 gap-6">
-        <div
-          role="tabpanel"
-          className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto py-4 pl-6 [&>*]:shrink-0"
-        >
-          {noting && (
-            <AgentReviewDialog
-              onCancel={() => setNoting(false)}
-              onStart={(note) => {
-                setNoting(false);
-                startAction({ action: PrAction.Review, ...(note ? { note } : {}) });
-              }}
-            />
-          )}
-          {picking && (
-            <AddressCommentsDialog
-              pr={pr}
-              onCancel={() => setPicking(false)}
-              onStart={(commentIds) => {
-                setPicking(false);
-                startAction({ action: PrAction.AddressComments, comment_ids: commentIds });
-              }}
-            />
-          )}
-          {tab === 'overview' ? overview : tab === 'files' ? files : <PrCommits pr={pr} />}
-        </div>
-        {sidebar}
-      </div>
+      <ThreadActionsContext.Provider value={threadActions}>
+        {noting && (
+          <AgentReviewDialog
+            onCancel={() => setNoting(false)}
+            onStart={(note) => {
+              setNoting(false);
+              startAction({ action: PrAction.Review, ...(note ? { note } : {}) });
+            }}
+          />
+        )}
+        {picking && (
+          <AddressCommentsDialog
+            pr={pr}
+            onCancel={() => setPicking(false)}
+            onStart={(commentIds) => {
+              setPicking(false);
+              startAction({ action: PrAction.AddressComments, comment_ids: commentIds });
+            }}
+          />
+        )}
+        {tab === 'files' ? (
+          // The rail is tied to the tab: the diff takes its width, and Overview and Commits bring it back.
+          <PrFiles pr={pr} viewed={viewed} />
+        ) : (
+          <div className="flex min-h-0 flex-1 gap-6">
+            <div
+              role="tabpanel"
+              className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto py-4 pl-6 [&>*]:shrink-0"
+            >
+              {tab === 'overview' ? overview : <PrCommits pr={pr} />}
+            </div>
+            {sidebar}
+          </div>
+        )}
+      </ThreadActionsContext.Provider>
     </div>
   );
 }

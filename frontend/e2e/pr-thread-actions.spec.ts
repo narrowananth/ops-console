@@ -20,6 +20,8 @@ const comment = (id: string, extra: Record<string, unknown> = {}) => ({
   file_path: 'src/cart.ts' as string | null,
   line: 12 as number | null,
   resolved: false,
+  outdated: null as boolean | null,
+  hunk: null as string | null,
   created_at: NOW,
   reply_count: 0,
   ...extra,
@@ -147,7 +149,7 @@ async function routePullRequest(
 const openPullRequest = (page: Page) => page.goto(`${daemon.url}/workspace?tab=pulls&pr=r1/7#token=${daemon.token}`);
 
 const thread = (page: Page, text: string) =>
-  page.getByRole('region', { name: 'Comments' }).getByRole('listitem').filter({ hasText: text });
+  page.getByRole('region', { name: 'Activity' }).getByRole('listitem').filter({ hasText: text });
 
 const ACTIONS = '/api/repos/r1/pull-requests/7/action-sessions';
 
@@ -367,14 +369,14 @@ test('Collapse all folds every file to its name and Expand all opens them again'
 
   const files = page.getByRole('region', { name: 'Files' });
   await expect(files.getByText('export const srcats = 1;')).toBeVisible();
-  await files.getByRole('button', { name: 'Collapse all' }).click();
+  await page.getByRole('button', { name: 'Collapse all' }).click();
   for (const name of ['srcats', 'srcbts', 'srccts'])
     await expect(files.getByText(`export const ${name} = 1;`)).toBeHidden();
 
   // A fold kept in the browser holds through a reload, as does the tab, and Expand all opens every file again.
   await page.reload();
   await expect(files.getByText('export const srcbts = 1;')).toBeHidden();
-  await files.getByRole('button', { name: 'Expand all' }).click();
+  await page.getByRole('button', { name: 'Expand all' }).click();
   for (const name of ['srcats', 'srcbts', 'srccts'])
     await expect(files.getByText(`export const ${name} = 1;`)).toBeVisible();
 });
@@ -469,4 +471,266 @@ test('Commits lists the branch’s commits newest first; conflicts show which fi
   await expect(page.getByRole('button', { name: 'Merge', exact: true })).toBeEnabled();
   await page.getByRole('tab', { name: 'Overview' }).click();
   await expect(page.getByRole('region', { name: 'Merge conflicts' })).toHaveCount(0);
+});
+
+const patch = (...rows: [string, string][]) => rows.map(([sign, text]) => ({ sign: sign as '+' | '-' | ' ', text }));
+
+const CART = {
+  name: 'src/cart.ts',
+  additions: 1,
+  deletions: 0,
+  lines: patch(
+    ['', ''],
+    [' ', '@@ -10,2 +10,3 @@ export function checkout()'],
+    [' ', 'const a = 1;'],
+    [' ', 'const b = 2;'],
+    ['+', 'if (!cart) return;'],
+  ).slice(1),
+};
+const TAX = {
+  name: 'src/tax.ts',
+  additions: 2,
+  deletions: 0,
+  lines: [
+    { sign: ' ' as const, text: '@@ -1,8 +1,10 @@' },
+    ...Array.from({ length: 8 }, (_, at) => ({ sign: ' ' as const, text: `const t${at + 1} = ${at + 1};` })),
+    { sign: '+' as const, text: 'const t9 = 9;' },
+    { sign: '+' as const, text: 'const t10 = 10;' },
+  ],
+};
+
+/** The hunk a Git host sends for a comment on `cart.ts` line 12. */
+const CART_HUNK = '@@ -10,2 +10,3 @@ export function checkout()\n const a = 1;\n const b = 2;\n+if (!cart) return;';
+
+test('Activity shows a thread as one card: state, place, the code, the comments, the actions; a resolved thread folds', async ({
+  page,
+}) => {
+  const comments = COMMENTS.map((item) =>
+    item.id === 'c1' ? { ...item, hunk: CART_HUNK } : item.id === 'c3' ? { ...item, outdated: true } : item,
+  );
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX], comments }) });
+  await openPullRequest(page);
+
+  const card = thread(page, 'Guard the empty cart.');
+  await expect(card).toContainText('open');
+  await expect(card).toContainText('src/cart.ts · line 12');
+  // The code the comment is on, its line marked, ahead of the comments.
+  const code = card.getByRole('img', { name: 'The code this comment is on' });
+  await expect(code).toContainText('@@ -10,2 +10,3 @@ export function checkout()');
+  await expect(code).toContainText('12');
+  await expect(code).toContainText('if (!cart) return;');
+  await expect(card).not.toContainText('Outdated');
+  await expect(card.getByText('Fixed in 33f8c2b2')).toBeVisible();
+
+  // The host's own flag says the line is outdated; a host that gave no hunk shows no code.
+  const flagged = thread(page, 'Name this rate.');
+  await expect(flagged).toContainText('Outdated');
+  await expect(flagged.getByRole('img', { name: 'The code this comment is on' })).toHaveCount(0);
+  // Without the host's flag, a line the newest diff does not hold is outdated too.
+  await expect(thread(page, 'Cache the rate lookup.')).toContainText('Outdated');
+  // A general comment has no file and no code.
+  await expect(thread(page, 'Nice work overall.')).toContainText('General comment');
+
+  // A resolved thread starts folded to its header; a click opens it, and the choice stays through a reload.
+  const resolved = thread(page, 'src/tax.ts · line 4');
+  await expect(resolved).toContainText('resolved');
+  await expect(resolved.getByText('Round the tax.')).toBeHidden();
+  await resolved.getByRole('button', { name: /resolved/ }).click();
+  await expect(resolved.getByText('Round the tax.')).toBeVisible();
+  await page.reload();
+  await expect(thread(page, 'src/tax.ts · line 4').getByText('Round the tax.')).toBeVisible();
+});
+
+test('the Activity filter narrows to open threads, resolved threads or the agent’s, and says when none match', async ({
+  page,
+}) => {
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX] }) });
+  await openPullRequest(page);
+  const list = page.getByRole('region', { name: 'Activity' }).getByRole('listitem');
+  const filter = page.getByRole('combobox', { name: 'Filter the activity' });
+
+  await expect(list).toHaveCount(5);
+  await filter.selectOption({ label: 'Open threads' });
+  await expect(list).toHaveCount(4);
+  await filter.selectOption({ label: 'Resolved threads' });
+  await expect(list).toHaveCount(1);
+  await expect(list).toContainText('src/tax.ts · line 4');
+  // The agent answered c3 and started c5.
+  await filter.selectOption({ label: 'Agent only' });
+  await expect(list).toHaveCount(2);
+  await expect(list.first()).toContainText('Name this rate.');
+  await expect(list.last()).toContainText('Cache the rate lookup.');
+
+  await routePullRequest(page, { current: pullRequest({ comments: [] }) });
+  await page.goto('about:blank');
+  await openPullRequest(page);
+  await expect(page.getByText('No comments yet. Open Files changed')).toBeVisible();
+  await expect(page.getByText('No thread in this view.')).toHaveCount(0);
+});
+
+test('a thread’s Check reply and Address comment start a Round for that thread alone', async ({ page }) => {
+  const detail = { current: pullRequest() };
+  const posted = await routePullRequest(page, detail);
+  await openPullRequest(page);
+
+  // c1 has a reply that is not the agent's; c3's last comment is the agent's; c4 has no reply; the resolved c2 offers neither.
+  await expect(thread(page, 'Guard the empty cart.').getByRole('button', { name: /Check reply/ })).toBeVisible();
+  await expect(thread(page, 'Name this rate.').getByRole('button', { name: /Check reply/ })).toHaveCount(0);
+  await expect(thread(page, 'Nice work overall.').getByRole('button', { name: /Check reply/ })).toHaveCount(0);
+  await expect(thread(page, 'Name this rate.').getByRole('button', { name: /Address comment/ })).toBeVisible();
+  await thread(page, 'src/tax.ts · line 4')
+    .getByRole('button', { name: /resolved/ })
+    .click();
+  await expect(thread(page, 'src/tax.ts · line 4').getByRole('button', { name: 'Unresolve' })).toBeVisible();
+  await expect(
+    thread(page, 'src/tax.ts · line 4').getByRole('button', { name: /Address comment|Check reply/ }),
+  ).toHaveCount(0);
+
+  await thread(page, 'Guard the empty cart.')
+    .getByRole('button', { name: /Check reply/ })
+    .click();
+  await expect.poll(() => posted).toEqual([{ path: ACTIONS, body: { action: 'check_replies', comment_ids: ['c1'] } }]);
+  await expect(page).toHaveURL(/session=s-check_replies/);
+});
+
+test('Address comment on a thread sends that thread’s id', async ({ page }) => {
+  const posted = await routePullRequest(page, { current: pullRequest() });
+  await openPullRequest(page);
+  await thread(page, 'Name this rate.')
+    .getByRole('button', { name: /Address comment/ })
+    .click();
+  await expect
+    .poll(() => posted)
+    .toEqual([{ path: ACTIONS, body: { action: 'address_comments', comment_ids: ['c3'] } }]);
+});
+
+test('while the PR Session works, the thread buttons wait and say why; the rail’s buttons stay', async ({ page }) => {
+  const detail = {
+    current: pullRequest({ action_sessions: [actionSession('sa1', 'address_comments', 'working')] }),
+  };
+  await routePullRequest(page, detail);
+  await openPullRequest(page);
+  const card = thread(page, 'Guard the empty cart.');
+  for (const name of [/Check reply/, /Address comment/]) {
+    await expect(card.getByRole('button', { name })).toBeDisabled();
+    await expect(card.getByRole('button', { name })).toHaveAttribute(
+      'title',
+      'The Session is working on this pull request',
+    );
+  }
+  await expect(page.getByRole('button', { name: /^Check replies/ })).toBeEnabled();
+});
+
+test('Files changed has no rail; Overview and Commits bring it back', async ({ page }) => {
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX] }) });
+  await openPullRequest(page);
+  const rail = page.getByRole('complementary', { name: 'Decision' });
+  await expect(rail).toBeVisible();
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await expect(page.getByRole('region', { name: 'Files' })).toBeVisible();
+  await expect(rail).toHaveCount(0);
+  await page.getByRole('tab', { name: /^Commits/ }).click();
+  await expect(rail).toBeVisible();
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await expect(rail).toBeVisible();
+});
+
+test('the Comments menu counts unresolved threads, lists them and the resolved ones, and a row jumps to its thread', async ({
+  page,
+}) => {
+  const comments = COMMENTS.map((item) => (item.id === 'c1' ? { ...item, hunk: CART_HUNK } : item));
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX], comments }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  await page.getByRole('button', { name: 'Expand all' }).click();
+
+  await page.getByRole('button', { name: 'Comments (3 unresolved)' }).click();
+  const unresolved = page.getByRole('region', { name: 'Unresolved Comments', exact: true });
+  await expect(unresolved).toContainText('3');
+  await expect(unresolved.getByRole('menuitem')).toHaveCount(3);
+  await expect(unresolved.getByRole('menuitem').first()).toContainText('reviewer');
+  await expect(unresolved.getByRole('menuitem').first()).toContainText('on cart.ts');
+  await expect(unresolved.getByRole('menuitem').first()).toContainText('Guard the empty cart.');
+  // The line the newest diff does not hold reads Outdated.
+  await expect(unresolved.getByRole('menuitem').filter({ hasText: 'Cache the rate lookup.' })).toContainText(
+    'Outdated',
+  );
+  // Resolved ones sit under their own fold.
+  const resolved = page.getByRole('region', { name: 'Resolved Comments', exact: true });
+  await expect(resolved).toContainText('1');
+  await resolved.getByRole('button', { name: /Resolved Comments/ }).click();
+  await expect(resolved.getByRole('menuitem')).toContainText('Round the tax.');
+
+  // A row closes the menu and scrolls to that thread in the diff, which shows the comments and the actions.
+  await unresolved.getByRole('menuitem').filter({ hasText: 'Name this rate.' }).click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  const inDiff = page.locator('[data-thread="c3"]');
+  await expect(inDiff).toBeInViewport();
+  await expect(inDiff.getByRole('button', { name: /Address comment/ })).toBeVisible();
+  // Under its line, a thread shows no code of its own.
+  await expect(inDiff.getByRole('img', { name: 'The code this comment is on' })).toHaveCount(0);
+});
+
+test('Sort lists the files as a tree or by their newest comment, and the choice stays', async ({ page }) => {
+  const other = { ...CART, name: 'a/b.ts' };
+  const readme = { ...CART, name: 'README.md' };
+  const comments = COMMENTS.map((item) =>
+    item.id === 'c3r' ? { ...item, created_at: '2026-11-01T11:00:00.000Z' } : item,
+  );
+  await routePullRequest(page, { current: pullRequest({ files: [readme, CART, TAX, other], comments }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  const names = () =>
+    page
+      .getByRole('region', { name: 'Files' })
+      .locator(':scope > section')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label')));
+
+  // Folders first, then files, each A to Z.
+  await expect.poll(names).toEqual(['a/b.ts', 'src/cart.ts', 'src/tax.ts', 'README.md']);
+  await page.getByRole('button', { name: 'Sort by File tree' }).click();
+  await page.getByRole('menuitemradio', { name: 'Recent comments' }).click();
+  // tax.ts has the newest comment, cart.ts the next; files with none follow in tree order.
+  await expect.poll(names).toEqual(['src/tax.ts', 'src/cart.ts', 'a/b.ts', 'README.md']);
+  await page.reload();
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await expect(page.getByRole('button', { name: 'Sort by Recent comments' })).toBeVisible();
+  await expect.poll(names).toEqual(['src/tax.ts', 'src/cart.ts', 'a/b.ts', 'README.md']);
+});
+
+test('the file tree shows each file’s +/− and unresolved threads, jumps to a file, and folds to a strip', async ({
+  page,
+}) => {
+  const deep = { ...CART, name: 'lib/a/b/util.ts' };
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX, deep] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  // cart.ts has c1 and c5 open; tax.ts has c3 open and the resolved c2.
+  await expect(tree.getByRole('button', { name: /^cart\.ts/ })).toContainText('2');
+  await expect(tree.getByRole('button', { name: /^cart\.ts/ })).toContainText('+1');
+  await expect(tree.getByRole('button', { name: /^tax\.ts/ })).toContainText('1');
+
+  // A folder that holds only one folder reads as one row.
+  await expect(tree.getByText('▾ lib/a/b')).toBeVisible();
+  await tree.getByRole('button', { name: /^tax\.ts/ }).click();
+  await expect(tree.getByRole('button', { name: /^tax\.ts/ })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByRole('region', { name: 'src/tax.ts' })).toBeInViewport();
+
+  await tree.getByRole('button', { name: 'Fold the file tree' }).click();
+  await expect(tree).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open the file tree' }).click();
+  await expect(tree).toBeVisible();
+});
+
+test('a thread in the diff has the same actions as in Activity', async ({ page }) => {
+  const posted = await routePullRequest(page, { current: pullRequest({ files: [CART, TAX] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  const inDiff = page.locator('[data-thread="c1"]');
+  await expect(inDiff.getByRole('button', { name: 'Resolve' })).toBeVisible();
+  await expect(inDiff.getByRole('button', { name: 'Reply', exact: true })).toBeVisible();
+  await inDiff.getByRole('button', { name: /Check reply/ }).click();
+  await expect.poll(() => posted).toEqual([{ path: ACTIONS, body: { action: 'check_replies', comment_ids: ['c1'] } }]);
 });

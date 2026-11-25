@@ -38,6 +38,10 @@ export type HostComment = {
   file_path: string | null;
   line: number | null;
   resolved: boolean;
+  /** The host's own flag that the line moved or went in a later commit; null when the host does not say. */
+  outdated: boolean | null;
+  /** The diff hunk the comment sits on, ending at its line; null when the host gives none. */
+  hunk: string | null;
   created_at: string;
 };
 

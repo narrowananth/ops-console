@@ -128,8 +128,17 @@ export class PrActionsService implements PrActionTools {
 
   async start(repoId: string, number: number, input: StartPrAction): Promise<Session> {
     const { action } = input;
-    if (action === PrAction.AddressComments ? !input.comment_ids?.length : input.comment_ids !== undefined) {
-      throw validationFailed('invalid body: comment_ids is for Address comments, and needs at least one');
+    const ids = input.comment_ids;
+    const badIds =
+      action === PrAction.AddressComments
+        ? !ids?.length
+        : action === PrAction.Review
+          ? ids !== undefined
+          : ids?.length === 0;
+    if (badIds) {
+      throw validationFailed(
+        'invalid body: comment_ids is for Address comments and Check replies, and needs at least one',
+      );
     }
     if (action !== PrAction.Review && input.note !== undefined) {
       throw validationFailed('invalid body: note is for Review with agent only');
@@ -142,20 +151,24 @@ export class PrActionsService implements PrActionTools {
     const agents = this.writes.agentCommentIds(repoId, number);
     let threads: HostComment[][] = [];
     if (action === PrAction.AddressComments) {
-      const ids = [...new Set(input.comment_ids)];
-      threads = ids.map((id) => threadOf(comments, id));
+      const unique = [...new Set(ids)];
+      threads = unique.map((id) => threadOf(comments, id));
       for (const [index, thread] of threads.entries()) {
         const root = thread[0];
-        if (!root) throw new ApiError(404, ErrorCode.NotFound, `no comment ${ids[index]} on this pull request`);
-        if (root.id !== ids[index] || root.parent_id !== null || root.resolved) {
-          throw validationFailed(`invalid body: ${ids[index]} is not an unresolved thread`);
+        if (!root) throw new ApiError(404, ErrorCode.NotFound, `no comment ${unique[index]} on this pull request`);
+        if (root.id !== unique[index] || root.parent_id !== null || root.resolved) {
+          throw validationFailed(`invalid body: ${unique[index]} is not an unresolved thread`);
         }
       }
     } else if (action === PrAction.CheckReplies) {
+      const wanted = ids && new Set(ids);
       threads = comments
-        .filter((comment) => comment.parent_id === null && !comment.resolved)
+        .filter((comment) => comment.parent_id === null && !comment.resolved && (!wanted || wanted.has(comment.id)))
         .map((root) => threadOf(comments, root.id))
         .filter((thread) => thread.length > 1 && !agents.has((thread.at(-1) as HostComment).id));
+      if (wanted && threads.length !== wanted.size) {
+        throw validationFailed('invalid body: comment_ids names a thread that has no reply to check');
+      }
       if (threads.length === 0) throw new ApiError(409, ErrorCode.InvalidState, 'No open thread has a reply to check');
     } else if (this.reviews.reviewed(repoId, number, pr.head_sha)) {
       throw new ApiError(

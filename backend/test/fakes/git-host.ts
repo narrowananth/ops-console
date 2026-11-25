@@ -172,6 +172,8 @@ export class FakeGitHost implements GitHostAdapter, GitHosts {
       file_path: comment.file_path ?? null,
       line: comment.line ?? null,
       resolved: false,
+      outdated: null,
+      hunk: null,
       created_at: new Date().toISOString(),
     };
     this.comments.set(number, [...(this.comments.get(number) ?? []), posted]);

@@ -56,9 +56,11 @@ test('a pull request keeps its header in view; the files and the decision rail s
   await page.getByRole('tab', { name: 'Files changed' }).click();
 
   const title = page.getByRole('heading', { name: /A long pull request/ });
-  const panel = page.getByRole('tabpanel');
+  const panel = page.getByRole('region', { name: 'Files' });
   const rail = page.getByRole('complementary', { name: 'Decision' });
   await expect(panel).toBeVisible();
+  // The rail is tied to the other tabs: Files changed gives the diff its width.
+  await expect(rail).toHaveCount(0);
 
   // The header is outside every scroller, so the diff scrolling never moves it.
   const before = await title.boundingBox();
@@ -68,7 +70,9 @@ test('a pull request keeps its header in view; the files and the decision rail s
   expect(await panel.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
   expect((await title.boundingBox())?.y).toBe(before?.y);
 
-  // The rail reaches its last section inside the window, whatever the window's height.
+  // On Overview the rail reaches its last section inside the window, whatever the window's height.
+  await page.getByRole('tab', { name: 'Overview' }).click();
+  await expect(rail).toBeVisible();
   const last = rail.getByRole('button', { name: 'New Session' });
   await last.scrollIntoViewIfNeeded();
   const box = await last.boundingBox();
