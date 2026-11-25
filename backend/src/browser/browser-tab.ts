@@ -697,7 +697,8 @@ export class BrowserTab {
     const staged = await stageFiles(message.files);
     // The page reads a file when it wants it, so the copy stays until the tab closes.
     this.chosenDirs.push(staged.dir);
-    if (message.x !== undefined && message.y !== undefined) await dropFiles(this.cdp, staged.paths, message.x, message.y);
+    if (message.x !== undefined && message.y !== undefined)
+      await dropFiles(this.cdp, staged.paths, message.x, message.y);
     else await fillFocusedFileField(this.cdp, staged.paths);
   }
 

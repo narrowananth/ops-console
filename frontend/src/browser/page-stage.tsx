@@ -3,7 +3,8 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { useChooseFiles } from '../lib/queries';
 import { createPainter, frameCache } from './frame-painter';
 import { clampRatio, fillSize, fitScale, isFill, type Size, toPagePoint } from './geometry';
-import { buttonName, isPasteShortcut, keyMessage, modifiersOf, wheelPixels } from './input';
+import { buttonName, isComposingKey, keyMessage, modifiersOf, onMac, pasteShortcut, wheelPixels } from './input';
+import { readPastedFiles } from './pasted-files';
 import { usePageStream } from './use-page-stream';
 
 /** Room kept around a device-sized page for its bezel. */
@@ -53,6 +54,9 @@ export function PageStage({
   const fill = isFill(tab.viewport);
   const choose = useChooseFiles();
   const picker = useRef<HTMLInputElement>(null);
+  // The element that takes the keys: a hidden text field, so the system's input method has something to type into.
+  const keys = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
 
   const fillRef = useRef(fill);
   fillRef.current = fill;
@@ -78,7 +82,11 @@ export function PageStage({
       else if (message.type === 'dialog') setNotice(message.message);
       else if (message.type === 'picked') onPicked?.(message.capture);
       else if (message.type === 'pick_failed') setNotice(message.message);
-      else onClosed();
+      else if (message.type === 'clipboard') {
+        navigator.clipboard
+          .writeText(message.text)
+          .catch(() => setNotice('The browser did not allow copying to the clipboard.'));
+      } else onClosed();
     },
     (frame) => {
       frameCache.remember(tab.id, frame);
@@ -271,6 +279,28 @@ export function PageStage({
     return () => target.removeEventListener('wheel', onWheel);
   }, []);
 
+  // Pasted and dropped files go to the daemon, which gives them to a file field the page has.
+  const sendFiles = async (list: File[], at?: { x: number; y: number }) => {
+    if (list.length === 0) return;
+    const { files, skipped } = await readPastedFiles(list);
+    if (skipped > 0) setNotice(`${skipped} file${skipped === 1 ? ' was' : 's were'} too large or too many to send.`);
+    if (files.length > 0) send({ type: 'paste', files, ...at });
+  };
+  const sendPaste = (text: string, files: File[]) => {
+    if (text) send({ type: 'paste', text: text.slice(0, 100_000) });
+    void sendFiles(files);
+  };
+  const pagePoint = (event: { clientX: number; clientY: number }) => {
+    const target = canvas.current;
+    const size = pageRef.current;
+    return target && size
+      ? toPagePoint({ x: event.clientX, y: event.clientY }, target.getBoundingClientRect(), size)
+      : null;
+  };
+  const sendCompose = (text: string) => {
+    if (text) send({ type: 'compose', text });
+  };
+
   const scale = page && !fill ? fitScale(page, { width: box.width - BEZEL, height: box.height - BEZEL }) : 1;
   const drawn =
     page && !fill ? { width: Math.round(page.width * scale), height: Math.round(page.height * scale) } : undefined;
@@ -280,9 +310,67 @@ export function PageStage({
       ref={stage}
       className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-neutral-300"
     >
+      <textarea
+        ref={keys}
+        aria-label={`${tab.title || 'Page'} (keyboard input)`}
+        autoCapitalize="off"
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        // Hidden, not removed: it holds the focus, and the input method draws its candidates beside it.
+        className="pointer-events-none absolute top-0 left-0 size-px resize-none overflow-hidden border-0 p-0 opacity-0 outline-none"
+        onFocus={() => send({ type: 'focus' })}
+        onKeyDown={(event) => {
+          // While picking, keys do not reach the page; Escape leaves pick mode.
+          if (picking) {
+            event.preventDefault();
+            return;
+          }
+          // The input method owns these keys: the page gets the text it composes.
+          if (isComposingKey(event.nativeEvent)) return;
+          const paste = pasteShortcut(event, onMac());
+          // A Command+V paste arrives as its own event, with the clipboard.
+          if (paste === 'native') return;
+          event.preventDefault();
+          if (paste === 'clipboard') {
+            // A Mac's Control+V fires no paste event, so the clipboard is read by hand.
+            void navigator.clipboard.readText().then(
+              (text) => sendPaste(text, []),
+              () => setNotice('The browser did not allow reading the clipboard.'),
+            );
+            return;
+          }
+          send(keyMessage('down', event.nativeEvent, onMac()));
+        }}
+        onKeyUp={(event) => {
+          if (picking || isComposingKey(event.nativeEvent) || pasteShortcut(event, onMac()) === 'native') return;
+          event.preventDefault();
+          send(keyMessage('up', event.nativeEvent, onMac()));
+        }}
+        onCompositionStart={() => {
+          composing.current = true;
+        }}
+        onCompositionEnd={(event) => {
+          composing.current = false;
+          event.currentTarget.value = '';
+          if (!picking) sendCompose(event.data);
+        }}
+        // Text an input method inserts with no composition, such as the emoji picker.
+        onInput={(event) => {
+          if (composing.current) return;
+          const field = event.currentTarget;
+          const text = field.value;
+          field.value = '';
+          if (text && !picking) sendCompose(text);
+        }}
+        onPaste={(event) => {
+          event.preventDefault();
+          if (picking) return;
+          sendPaste(event.clipboardData.getData('text/plain'), [...event.clipboardData.files]);
+        }}
+      />
       <canvas
         ref={canvas}
-        tabIndex={0}
         aria-label={tab.title || 'Page'}
         style={drawn}
         // Nothing shows before the first frame: an empty canvas would flash white.
@@ -291,14 +379,23 @@ export function PageStage({
             ? `absolute inset-0 size-full outline-none ${framePage === null ? 'invisible' : ''}`
             : 'flex-none rounded-3xl bg-white ring-8 ring-neutral-900 outline-none'
         } ${picking ? 'cursor-crosshair' : ''}`}
-        onFocus={() => send({ type: 'focus' })}
         onContextMenu={(event) => event.preventDefault()}
+        // A file dropped on the page is the page's: without these Chrome would open it in the console's own tab.
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (picking) return;
+          const at = pagePoint(event);
+          if (at) void sendFiles([...event.dataTransfer.files], at);
+        }}
         onMouseMove={(event) => {
           if (!dragging.current) queueMove(event);
         }}
         onMouseDown={(event) => {
+          // The keys go to the hidden field; a click on the canvas would take the focus from it.
+          event.preventDefault();
+          keys.current?.focus({ preventScroll: true });
           if (picking) {
-            event.preventDefault();
             if (event.button === 0) pickAt('click', event);
             return;
           }
@@ -314,28 +411,6 @@ export function PageStage({
           };
           window.addEventListener('mousemove', track);
           window.addEventListener('mouseup', release);
-        }}
-        onKeyDown={(event) => {
-          // While picking, keys do not reach the page; Escape leaves pick mode.
-          if (picking) {
-            event.preventDefault();
-            return;
-          }
-          // A paste arrives as its own event, with the text.
-          if (isPasteShortcut(event)) return;
-          event.preventDefault();
-          send(keyMessage('down', event));
-        }}
-        onKeyUp={(event) => {
-          if (picking || isPasteShortcut(event)) return;
-          event.preventDefault();
-          send(keyMessage('up', event));
-        }}
-        onPaste={(event) => {
-          event.preventDefault();
-          if (picking) return;
-          const text = event.clipboardData.getData('text/plain');
-          if (text) send({ type: 'text', text: text.slice(0, 100_000) });
         }}
       />
       {overlay && <div className="absolute inset-0 overflow-auto bg-card">{overlay}</div>}
