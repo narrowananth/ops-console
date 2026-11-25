@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -45,7 +45,7 @@ const closedFolders = [
   ['a .. traversal', '~/Library/../.ops-console/secrets'],
 ];
 
-describe('the setup read tools keep out of the closed folders', () => {
+describe('the setup read tools', () => {
   it.each(closedFiles)('read_local_file refuses %s', async (_how, given) => {
     await expect(readLocalFile(given, keep)).rejects.toMatchObject({
       message: expect.stringContaining('closed to the agent'),
@@ -56,6 +56,20 @@ describe('the setup read tools keep out of the closed folders', () => {
     await expect(listLocalDir(given)).rejects.toMatchObject({
       message: expect.stringContaining('closed to the agent'),
     });
+  });
+
+  it('a read macOS refuses tells the operator to turn on Full Disk Access', async () => {
+    const shut = path.join(home, 'shut');
+    mkdirSync(shut);
+    writeFileSync(path.join(shut, 'inside.txt'), 'x');
+    chmodSync(shut, 0o000);
+    try {
+      const refusal = { message: expect.stringContaining('Full Disk Access under Accounts & Usage') };
+      await expect(listLocalDir(shut)).rejects.toMatchObject(refusal);
+      await expect(readLocalFile(path.join(shut, 'inside.txt'), keep)).rejects.toMatchObject(refusal);
+    } finally {
+      chmodSync(shut, 0o700);
+    }
   });
 
   it('still reads and lists everything else, a link to it included', async () => {

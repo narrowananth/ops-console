@@ -59,7 +59,11 @@ async function openable(given: string): Promise<{ shown: string; real: string }>
 function fileError(error: unknown, where: string): ApiError {
   const code = (error as NodeJS.ErrnoException).code;
   if (code === 'ENOENT') return new ApiError(404, ErrorCode.NotFound, `nothing at ${where}`);
-  if (code === 'EACCES' || code === 'EPERM') return validationFailed(`no permission to read ${where}`);
+  if (code === 'EACCES' || code === 'EPERM') {
+    return validationFailed(
+      `no permission to read ${where}. Tell the operator to turn on Full Disk Access under Accounts & Usage, On this machine, then read it again.`,
+    );
+  }
   if (code === 'EISDIR') return validationFailed(`${where} is a folder; list it instead`);
   if (code === 'ENOTDIR') return validationFailed(`${where} is a file; read it instead`);
   return validationFailed(`could not read ${where}: ${code ?? String(error)}`);
