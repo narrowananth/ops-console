@@ -452,9 +452,13 @@
     </div>
     <nav class="nav" aria-label="Ops Console">
       <div class="group"><span class="txt">Operate</span><span class="dot">·</span></div>
-      <button class="item" data-page="workspace" title="Workspace">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M9 9v11"/></svg>
-        <span class="lbl">Workspace</span>
+      <button class="item" data-page="workspace" data-ws="sessions" title="Sessions">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11h-9l-4 3.5V16H4z" stroke-linejoin="round"/></svg>
+        <span class="lbl">Sessions</span><span class="badge alert" title="3 Sessions wait on you">3</span>
+      </button>
+      <button class="item" data-page="workspace" data-ws="pulls" title="Pull requests">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="19" r="2"/><path d="M6 7v10M18 17V10a3 3 0 0 0-3-3h-3M14 4l-2 3 2 3"/></svg>
+        <span class="lbl">Pull requests</span>
       </button>
       <button class="item on" data-page="monitor" title="Monitor">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
@@ -742,7 +746,7 @@
               <div class="md" style="padding:12px 16px;font-size:13px"><h3>Root cause</h3><p>The payments client waits as long as the gateway does, so a slow upstream holds the request for 30s.</p><h3>Proposed fix</h3><p>Time out after 8s and retry once with the same idempotency key.</p></div>
             </section>
             <section class="card" aria-label="Fix" style="padding:14px 16px">
-              <div class="row m" style="margin-bottom:8px"><strong>Fix</strong><span class="s muted">running</span><a class="ml s" href="#workspace" data-page="workspace">Open the Session →</a></div>
+              <div class="row m" style="margin-bottom:8px"><strong>Fix</strong><span class="s muted">running</span><a class="ml s" href="#workspace" data-page="workspace" data-ws="sessions">Open the Session →</a></div>
               <ol class="stages"><li>✓ Ticket</li><li>✓ Branch</li><li>✓ Code</li><li class="b">◐ Tests</li><li class="muted">· PR</li></ol>
               <div class="xs muted" style="margin-top:4px">Fix (built-in): Code and Tests are its steps.</div>
               <div class="wrapr s" style="margin-top:8px;gap:12px"><span class="pill mono" style="font-size:12px;color:var(--text)">fix/OPS-142-payments-timeout</span><a href="#">OPS-142</a></div>
@@ -1472,13 +1476,20 @@ pnpm build</pre><button class="cp" aria-label="Copy" title="Copy"><svg width="14
   const app = $('#app');
 
   /* Pages: the sidebar, header buttons and links move between them; the address keeps the page. */
-  function show(page) {
+  function show(page, ws) {
     if (!$('#p-' + page)) page = 'monitor';
-    $$('.item').forEach((b) => b.classList.toggle('on', b.dataset.page === page));
+    if (page === 'workspace') {
+      // Sessions and Pull requests are two sidebar items; the screen below is kept as drawn, with its tabs.
+      ws = ws || ($('[data-pane="wstab:pulls"]').hidden ? 'sessions' : 'pulls');
+      $$('[data-go^="wstab:"]').forEach((b) => b.classList.toggle('on', b.dataset.go === 'wstab:' + ws));
+      $$('[data-pane^="wstab:"]').forEach((p) => (p.hidden = p.dataset.pane !== 'wstab:' + ws));
+    }
+    $$('.item').forEach((b) => b.classList.toggle('on', page === 'workspace' ? b.dataset.ws === ws : b.dataset.page === page));
     $$('.page').forEach((p) => p.classList.toggle('on', p.id === 'p-' + page));
     history.replaceState(null, '', '#' + page);
   }
-  $$('[data-page]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); show(el.dataset.page); }));
+  $$('[data-page]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); show(el.dataset.page, el.dataset.ws); }));
+  $$('[data-go^="wstab:"]').forEach((b) => b.addEventListener('click', () => show('workspace', b.dataset.go.slice(6))));
   show(location.hash.slice(1) || 'monitor');
 
   $('#theme').addEventListener('click', (e) => {
