@@ -11,7 +11,7 @@ import { ConnectorsModule } from '../src/connectors/connectors.module';
 import { LoopbackGoogleAuth } from '../src/connectors/google-auth';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import type { DiskAccessGate } from '../src/terminals/disk-access';
-import type { KeychainItem, LocalKeychain } from '../src/terminals/local-sources';
+import type { KeychainItem, LocalKeychain } from '../src/anonymous-tools/local-sources';
 import type { StartAtLoginGate } from '../src/terminals/start-at-login';
 import { TerminalsModule } from '../src/terminals/terminals.module';
 import { TerminalsService } from '../src/terminals/terminals.service';

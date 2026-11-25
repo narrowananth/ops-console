@@ -181,6 +181,14 @@ export const connectionCheckSchema = z.object({
   last_checked_at: z.string(),
 });
 
+/** A masked field the agent of an Anonymous Session asked for: the label says what the secret is, never its value. */
+export const secretRequestSchema = z.object({ request_id: z.string(), label: z.string() });
+
+export type SecretRequest = z.infer<typeof secretRequestSchema>;
+
+/** `POST /sessions/:id/secret-requests/:request_id`: the operator's answer, which only the daemon reads. */
+export const answerSecretRequestSchema = z.object({ value: z.string().min(1) });
+
 export const createTerminalSchema = z.object({ kind: z.enum(TerminalKind) });
 
 export const terminalSecretSchema = z.object({ request_id: z.string().min(1), value: z.string().min(1) });
