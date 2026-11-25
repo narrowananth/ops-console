@@ -374,7 +374,7 @@ function Loaded(props: {
           <div className="flex min-h-0 flex-1 gap-6">
             <div
               role="tabpanel"
-              className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto py-4 pl-6 [&>*]:shrink-0"
+              className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-6 py-4 [scrollbar-gutter:stable] [&>*]:shrink-0"
             >
               {tab === 'overview' ? overview : <PrCommits pr={pr} />}
             </div>
