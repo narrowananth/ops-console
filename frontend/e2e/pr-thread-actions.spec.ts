@@ -925,29 +925,111 @@ test('the file tree draws guide lines for each folder level and keeps its rows a
   expect(two.y - (one.y + one.height)).toBeGreaterThanOrEqual(3);
 });
 
-test('a file’s tip wraps its path inside its bubble, between folders (Behavior 6)', async ({ page }) => {
-  const path = 'services/export/src/test/java/superfans/engage/export/ExportHarnessWithAVeryLongName.java';
-  const file = {
-    name: path,
-    additions: 1,
-    deletions: 0,
-    lines: [
-      { sign: ' ' as const, text: '@@ -1 +1,2 @@' },
-      { sign: '+' as const, text: 'export const a = 1;' },
-    ],
-  };
-  await routePullRequest(page, { current: pullRequest({ files: [file], comments: [] }) });
+const treeFile = (name: string) => ({
+  name,
+  additions: 1,
+  deletions: 0,
+  lines: [
+    { sign: ' ' as const, text: '@@ -1 +1,2 @@' },
+    { sign: '+' as const, text: 'export const a = 1;' },
+  ],
+});
+
+test('a folder in the file tree folds and opens, each keeping its own state (Behavior 1, 2)', async ({ page }) => {
+  const files = [
+    treeFile('README.md'),
+    treeFile('src/main/java/App.java'),
+    treeFile('src/main/java/Util.java'),
+    treeFile('src/test/Spec.java'),
+  ];
+  await routePullRequest(page, { current: pullRequest({ files, comments: [] }) });
   await openPullRequest(page);
   await page.getByRole('tab', { name: /^Files changed/ }).click();
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  const folder = (name: string) => tree.getByRole('button', { name, exact: true });
+  const file = (name: RegExp) => tree.getByRole('button', { name });
 
-  await page
-    .getByRole('navigation', { name: 'Files in this pull request' })
-    .getByRole('button', { name: /^ExportHarness/ })
-    .hover();
+  await expect(folder('src')).toHaveAttribute('aria-expanded', 'true');
+  await expect(file(/^App\.java/)).toBeVisible();
+
+  // Fold the inner folder, then the outer one: every row under it goes, at any depth.
+  await folder('main/java').click();
+  await expect(folder('main/java')).toHaveAttribute('aria-expanded', 'false');
+  await expect(file(/^App\.java/)).toHaveCount(0);
+  await expect(file(/^Spec\.java/)).toBeVisible();
+  await folder('src').click();
+  await expect(file(/^Spec\.java/)).toHaveCount(0);
+  await expect(folder('main/java')).toHaveCount(0);
+  await expect(file(/^README\.md/)).toBeVisible();
+
+  // Opening the outer folder leaves the inner one folded; Enter on the focused row opens that one.
+  await folder('src').click();
+  await expect(folder('main/java')).toBeVisible();
+  await expect(file(/^App\.java/)).toHaveCount(0);
+  await folder('main/java').focus();
+  await page.keyboard.press('Enter');
+  await expect(file(/^App\.java/)).toBeVisible();
+});
+
+test('a flat list sorted by recent comments has no folders to fold (Behavior 5)', async ({ page }) => {
+  await routePullRequest(page, {
+    current: pullRequest({ files: [treeFile('src/main/App.java'), treeFile('README.md')], comments: [] }),
+  });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await page.getByRole('button', { name: 'Sort by File tree' }).click();
+  await page.getByRole('menuitemradio', { name: 'Recent comments' }).click();
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  // A flat list names each file by its path.
+  await expect(tree.getByRole('button', { name: /^src\/main\/App\.java/ })).toBeVisible();
+  await expect(tree.locator('[aria-expanded]')).toHaveCount(0);
+});
+
+test('hovering a file shows a background and no tip, and the guide lines run past it (Behavior 6, 7)', async ({
+  page,
+}) => {
+  await routePullRequest(page, {
+    current: pullRequest({
+      files: [treeFile('src/main/java/App.java'), treeFile('src/main/java/Util.java')],
+      comments: [],
+    }),
+  });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  const app = tree.getByRole('button', { name: /^App\.java/ });
+  await app.hover();
+  await page.waitForTimeout(700);
+  await expect(page.getByRole('tooltip')).toHaveCount(0);
+  await expect(app).not.toHaveAttribute('title', /.+/);
+  expect(await app.evaluate((node) => getComputedStyle(node).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
+
+  // The file sits one folder down, so one guide line at 12 px: its row starts to the right of it.
+  const row = tree.getByRole('listitem').filter({ has: page.getByRole('button', { name: /^App\.java/ }) });
+  const [li, button] = [await row.boundingBox(), await app.boundingBox()];
+  expect(li && button).toBeTruthy();
+  if (!li || !button) return;
+  expect(button.x - li.x).toBeGreaterThanOrEqual(14);
+});
+
+test('a tip still wraps a long path inside its bubble, between folders (Behavior 8)', async ({ page }) => {
+  const path = 'services/export/src/test/java/superfans/engage/export/ExportHarnessWithAVeryLongName.java';
+  await routePullRequest(page, { current: pullRequest({ files: [treeFile('a.ts')], comments: [] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  // Any element's `title` shows as a tip; this one stands in for a long path.
+  await page.evaluate((title) => {
+    const button = document.createElement('button');
+    button.id = 'long-tip';
+    button.textContent = 'x';
+    button.title = title;
+    button.style.cssText = 'position:fixed;left:120px;top:200px';
+    document.body.append(button);
+  }, path);
+  await page.locator('#long-tip').hover();
   const tip = page.getByRole('tooltip');
   await expect(tip).toBeVisible();
   await expect(tip).toContainText(path);
-  // Nothing runs past the bubble's edge, and it breaks at slashes, so it takes more than one line.
   const fit = await tip.evaluate((node) => ({
     overflow: node.scrollWidth - node.clientWidth,
     height: node.getBoundingClientRect().height,
