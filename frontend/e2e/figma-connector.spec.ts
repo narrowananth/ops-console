@@ -6,7 +6,7 @@ const daemon: { url: string; token: string } = JSON.parse(readFileSync(DAEMON_FI
 
 const SIGN_IN_URL = 'https://www.figma.com/oauth/mcp';
 const NOTE =
-  "Read only. Sessions can look at your designs and never change them. Figma's own plan and seat limits apply: Dev and Full seats on a paid plan, 200 calls a day on Professional.";
+  "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none.";
 
 const figma = (extra: Record<string, unknown> = {}) => ({
   id: 'figma',

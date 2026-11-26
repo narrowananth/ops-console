@@ -59,6 +59,20 @@ describe('the Read list of the Figma server', () => {
     }
   });
 
+  it('holds under the other names Figma’s server can carry, whatever the case', () => {
+    for (const server of ['Figma', 'figma-desktop', 'claude_ai_Figma', 'plugin_figma_figma']) {
+      expect(readListDenial(`mcp__${server}__use_figma`), server).toMatch(/Figma is read only here/);
+      expect(readListDenial(`mcp__${server}__get_design_context`), server).toBeNull();
+    }
+  });
+
+  it('reads the server and the tool apart at the first double underscore after the server name', () => {
+    // `figma` then `a__b`: a tool with a double underscore is still a tool of Figma and is not on the list.
+    expect(readListDenial('mcp__figma__a__b')).toMatch(/read only/);
+    // The server `my`, whose tool is `figma__use_figma`: another server, left alone.
+    expect(readListDenial('mcp__my__figma__use_figma')).toBeNull();
+  });
+
   it('names the known write tools for the run to leave out of its tool list', () => {
     expect(readListRefusals()).toEqual(FIGMA_WRITES.map((tool) => `mcp__figma__${tool}`));
   });

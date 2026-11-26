@@ -1,6 +1,7 @@
 # Figma Connector, read only
 
 **Status:** shipped
+**Open:** Behaviors 2, 3, 8 and 9 are checked against a fake server only. The sign-in and a real read against Figma wait for the operator's account.
 **Design:** the Connector pane of Integrations (`design/ops-console.html`), as for Sentry: a numbered sign-in step and Disconnect. No new screen.
 
 ## Problem
@@ -33,7 +34,8 @@ mapping saved.
 6. The refused tools are not offered to the agent at all when the run starts, so it does not plan around them. A call that
    still arrives is refused as in 4.
 7. A job the console starts (Verify, Fix, a pull request review, reply or comment pass, Open pull request) does not reach
-   Figma, as it reaches no Connector server of this kind.
+   Figma, as it reaches no Connector server of this kind. A pull request's Session does not reach it either, and is told
+   nothing about it, since it reads text the operator did not write.
 8. Each Figma call shows in the Session as a step naming the tool, as other MCP tools do.
 9. Figma may refuse a call: no seat that allows it, a plan without access, a rate limit (Professional seats get 200 calls a
    day and 10 a minute; View and Collab seats 20 a month; Starter plans none). The agent receives Figma's own message and the
@@ -53,6 +55,8 @@ mapping saved.
 ## Settled
 
 - **Read only is the operator's choice** and holds for Figma alone: the other Connectors on the roadmap offer their writes behind an Approval.
+- **Other names of Figma's server** (a claude.ai connector, a plugin, the desktop server, in any case) are held to the same
+  Read list, so Figma is read only however it reaches a run. A server of another vendor is left alone.
 - **Remote server only.** Figma's desktop server needs the Figma desktop app and Dev Mode and has fewer tools. It is not
   part of this release.
 - **Reach**: the operator's own chat runs only, by the same scope rule that keeps other Connector servers out of jobs.
@@ -113,8 +117,7 @@ Figma is read only here.
 ## UI
 
 - **Connector pane**: Figma's brand icon, one numbered step "Sign in to Figma" with Connect, then status and Disconnect, as
-  for Sentry. A note under the step: "Read only. Sessions can look at your designs and never change them. Figma's own plan
-  and seat limits apply: Dev and Full seats on a paid plan, 200 calls a day on Professional."
+  for Sentry. A note under the step: "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none."
 - **States**: off, waiting for sign-in (with Cancel), connected, `auth` with the reason (including a refusal for the
   console's client), `fail` when the server is off.
 - **Session transcript**: Figma calls as steps; a refused call shows the refusal text.

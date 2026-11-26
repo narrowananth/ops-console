@@ -71,7 +71,7 @@ const NEW_RELIC_KEY_DISCONNECT =
 /** What a pane says under its sign-in step, for a Connector that limits what Sessions do with the service. */
 const NOTES: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.Figma]:
-    "Read only. Sessions can look at your designs and never change them. Figma's own plan and seat limits apply: Dev and Full seats on a paid plan, 200 calls a day on Professional.",
+    "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none.",
 };
 
 const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {

@@ -1266,6 +1266,8 @@ export class AgentRuntime implements OnModuleDestroy {
       ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
       ...(scope.withoutConnections ? this.connectionServers() : []),
       ...scope.withoutConnectors,
+      // A pull request's Session reads text the operator did not write: it reaches no server with a Read list.
+      ...(session.prAction === null ? [] : READ_LIST_SERVERS),
     ];
     // A server with a Read list is described only to a run that starts it, for a Connector that is connected.
     const connected = this.connectedServers();

@@ -1,13 +1,21 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, ConnectorId, HealthStatus, type LogSource, RunPurpose, type WsEvent } from '@ops-console/shared';
+import {
+  AccessMode,
+  ConnectorId,
+  HealthStatus,
+  type LogSource,
+  PrAction,
+  RunPurpose,
+  type WsEvent,
+} from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mcpScope } from '../src/agent/mcp-scope';
 import { NEW_RELIC_QUERY_TOOL } from '../src/agent/new-relic-tool';
 import { RUN_INTEGRATION_TOOL } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
-import { connectors } from '../src/db/schema';
+import { connectors, sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
@@ -548,6 +556,22 @@ describe('Figma Connector, read only', () => {
 
     connect(daemon, HealthStatus.Auth);
     await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/figma/i);
+  });
+
+  it('keeps Figma out of a pull request’s Session: no server, no note', async () => {
+    const daemon = await start();
+    connect(daemon, HealthStatus.Ok);
+    const id = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, id)).run();
+    });
+    await converse(daemon, id, 'review it');
+    const denied =
+      (
+        calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+      )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+    expect(denied).toContain('figma');
     expect(append(daemon)).not.toMatch(/figma/i);
   });
 

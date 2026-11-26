@@ -11,8 +11,8 @@ already be added in Integrations without one, which is the route for local devel
 
 ## Today
 
-Sixteen Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
-Google Drive and four log sources (OpenTelemetry, CloudWatch, Loki, New Relic). Jira's Atlassian server also reaches
+Seventeen Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
+Google Drive, four log sources (OpenTelemetry, CloudWatch, Loki, New Relic) and Figma, which is read only. Jira's Atlassian server also reaches
 Confluence. Database Connections cover Postgres, MongoDB, Redis, ClickHouse, Firebase and Kafka.
 
 ## The stack this plan assumes

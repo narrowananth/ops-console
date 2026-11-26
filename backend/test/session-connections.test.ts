@@ -254,7 +254,8 @@ describe('a PR Session', () => {
       tx.insert(sessionConnections).values({ sessionId: id, connectionId: mongo.id }).run();
     });
     await ask(daemon, id, { text: 'ok' });
-    expect(denied(daemon)).toEqual(['mongo-prod', 'pg-staging']);
+    // Every Connection, and the Connector servers with a Read list (Figma), stay out of a pull request's Session.
+    expect(denied(daemon)).toEqual(['figma', 'mongo-prod', 'pg-staging']);
     expect(append(daemon)).not.toContain('ops-result');
     expect(append(daemon)).not.toContain('mongo-prod');
     const patched = await api(daemon).patch(`/sessions/${id}`, { connection_ids: [mongo.id] });
