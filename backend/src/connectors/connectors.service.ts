@@ -166,6 +166,8 @@ export class ConnectorsService implements OnModuleDestroy {
   async connect(id: ConnectorId, input: ConnectInput = {}): Promise<void> {
     // The Log folder has no sign-in: choosing it connects, or is refused, before this answers.
     if (id === ConnectorId.OtelLogs) return this.chooseFolder(input.folder);
+    // Render's key is required: without one nothing starts.
+    if (id === ConnectorId.Render) renderKey(input);
     // A User API key replaces any sign-in waiting or held, and finishes before this answers.
     if (id === ConnectorId.NewRelicLogs && input.api_key !== undefined)
       return this.connectWithKey(input.api_key, input);
@@ -478,6 +480,15 @@ export class ConnectorsService implements OnModuleDestroy {
         await this.mcp.ensureRegistered(server);
         const found = await this.mcp.checkOne(server.name);
         if (!signal.aborted) this.record(id, serverReading(found, config));
+        return;
+      }
+      case ConnectorId.Render: {
+        const server = CONNECTOR_SERVERS[id] as McpSpec;
+        // The key reaches the server through the Keychain and the launcher, never Claude Code's config. A key that
+        // differs from the stored one registers the server again.
+        await this.mcp.ensureRegistered(server, { RENDER_AUTH: `Bearer ${renderKey(input)}` });
+        const found = await this.mcp.checkOne(server.name);
+        if (!signal.aborted) this.record(id, serverReading(found, config, true));
         return;
       }
       case ConnectorId.CloudWatchLogs: {
@@ -950,7 +961,7 @@ export class ConnectorsService implements OnModuleDestroy {
         const server = CONNECTOR_SERVERS[id] as McpSpec;
         const found = await this.mcp.checkOne(server.name).catch(() => null);
         if (found === null || !found.registered) return signedOut(`${server.name} is not registered`);
-        return serverReading(found, config);
+        return serverReading(found, config, id === ConnectorId.Render);
       }
     }
   }
@@ -999,7 +1010,11 @@ export class ConnectorsService implements OnModuleDestroy {
     for (const row of riders) {
       const found = servers?.data.find((server) => server.name === CONNECTOR_SERVERS[row.id]?.name);
       if (!found?.registered || found.status === HealthStatus.Checking) continue;
-      const reading = serverReading(found, JSON.parse(row.config) as Record<string, string | null>);
+      const reading = serverReading(
+        found,
+        JSON.parse(row.config) as Record<string, string | null>,
+        row.id === ConnectorId.Render,
+      );
       // Same status: the stored reason stays, such as why the last sign-in failed.
       if (reading.status !== row.status) this.record(row.id, reading);
     }
@@ -1084,6 +1099,7 @@ export const SERVER_ONLY: ConnectorId[] = [
   ConnectorId.Figma,
   ConnectorId.Notion,
   ConnectorId.Shortcut,
+  ConnectorId.Render,
 ];
 
 type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;
@@ -1213,11 +1229,28 @@ function unreachable(error: unknown): Reading {
   return { status: HealthStatus.Fail, detail, accountLabel: null, login: null };
 }
 
-/** A Connector that rides an MCP Server reads as the server does. */
-function serverReading(found: McpServer, config: Record<string, string | null>): Reading {
+/** A stdio server that holds a key says so, in its failure, when the service refuses it. */
+const REFUSED_KEY = /\b(?:401|403|unauthori[sz]ed|forbidden|invalid (?:api )?(?:key|token))\b/i;
+
+/** The key Render's Connect needs, trimmed by the body's schema; 422 `validation_failed` without one. */
+function renderKey(input: ConnectInput): string {
+  if (input.api_key === undefined) throw validationFailed('an API key is required');
+  return input.api_key;
+}
+
+/**
+ * A Connector that rides an MCP Server reads as the server does. With `keyed`, a failure that says the service
+ * refused the key reads `auth`, as a refused sign-in does, and keeps the service's words.
+ */
+function serverReading(found: McpServer, config: Record<string, string | null>, keyed = false): Reading {
   const off = found.status === HealthStatus.Off;
+  const refused =
+    keyed &&
+    found.status === HealthStatus.Fail &&
+    found.status_detail !== null &&
+    REFUSED_KEY.test(found.status_detail);
   return {
-    status: off ? HealthStatus.Fail : found.status,
+    status: off ? HealthStatus.Fail : refused ? HealthStatus.Auth : found.status,
     detail: off ? `${found.name} is turned off in MCP servers` : found.status_detail,
     accountLabel: config.workspace || config.org || config.site || null,
     login: null,

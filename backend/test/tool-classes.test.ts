@@ -337,3 +337,135 @@ describe('the tool classes of the Shortcut server (ask, by the words of the name
     expect(askSummary(ask, { iteration_id: 9, comment: 'x'.repeat(5000) }).length).toBeLessThan(200);
   });
 });
+
+const RENDER_READS = [
+  'list_workspaces',
+  'get_selected_workspace',
+  'select_workspace',
+  'list_services',
+  'get_service',
+  'list_deploys',
+  'get_deploy',
+  'list_events',
+  'list_logs',
+  'list_log_label_values',
+  'get_metrics',
+  'list_postgres_instances',
+  'get_postgres',
+  'list_key_value',
+  'get_key_value',
+  'get_blueprint',
+  'list_workflows',
+  'get_workflow',
+  'list_workflow_versions',
+  'get_workflow_version',
+  'list_workflow_tasks',
+  'get_workflow_task',
+  'list_workflow_runs',
+  'get_workflow_run',
+  'get_workflow_run_results',
+  'list_flows',
+  'get_flow',
+  'list_flow_runs',
+  'get_flow_run',
+  'get_flow_run_results',
+  'list_flow_run_steps',
+  'get_flow_run_step',
+];
+
+const RENDER_WRITES = [
+  'query_render_postgres',
+  'create_web_service',
+  'create_static_site',
+  'create_cron_job',
+  'create_postgres',
+  'create_key_value',
+  'run_cron_job',
+  'cancel_cron_job_run',
+  'create_blueprint',
+  'plan_blueprint',
+  'update_blueprint',
+  'create_workflow',
+  'create_workflow_version',
+  'start_flow_run',
+  'cancel_flow_run',
+];
+
+const RENDER_DESTRUCTIVE = ['trigger_deploy', 'update_environment_variables', 'approve_blueprint'];
+
+describe('the tool classes of the Render server (ask, by lists)', () => {
+  it('lets a read through, workflow reads and select_workspace included, and asks about nothing', () => {
+    for (const tool of RENDER_READS) {
+      expect(toolAsk(`mcp__render__${tool}`), tool).toBeNull();
+      expect(toolRefusal(`mcp__render__${tool}`), tool).toBeNull();
+    }
+  });
+
+  it('asks about a write, which full access skips, and treats SQL on a database as a write', () => {
+    for (const tool of RENDER_WRITES) {
+      expect(toolAsk(`mcp__render__${tool}`), tool).toEqual({ service: 'Render', tool, destructive: false });
+      expect(toolRefusal(`mcp__render__${tool}`), tool).toBeNull();
+    }
+  });
+
+  it('asks in every mode about a deploy, an environment change and a blueprint approval, and about any tool no list names', () => {
+    for (const tool of [...RENDER_DESTRUCTIVE, 'delete_service', 'suspend_service', 'a_later_tool', 'x']) {
+      expect(toolAsk(`mcp__render__${tool}`), tool).toEqual({ service: 'Render', tool, destructive: true });
+    }
+  });
+
+  it('holds under the other names Render’s server can carry, whatever the case', () => {
+    for (const server of ['Render', 'claude_ai_Render', 'plugin_render_render']) {
+      expect(toolAsk(`mcp__${server}__list_services`), server).toBeNull();
+      expect(toolAsk(`mcp__${server}__create_cron_job`), server).toMatchObject({ destructive: false });
+      expect(toolAsk(`mcp__${server}__trigger_deploy`), server).toMatchObject({ destructive: true });
+    }
+    for (const tool of ['mcp__render-docs__trigger_deploy', 'mcp__renderer__trigger_deploy', 'Bash']) {
+      expect(toolAsk(tool), tool).toBeNull();
+    }
+  });
+
+  it('is never refused, and is not left out of the run’s tool list', () => {
+    expect(toolRefusal('mcp__render__trigger_deploy')).toBeNull();
+    expect(toolRefusals().filter((rule) => rule.startsWith('mcp__render__'))).toEqual([]);
+  });
+
+  it('tells the agent which tools read, which change things and ask, and which always ask', () => {
+    const note = toolNote('render');
+    for (const tool of [...RENDER_READS, ...RENDER_WRITES, ...RENDER_DESTRUCTIVE])
+      expect(note).toContain(`mcp__render__${tool}`);
+    expect(note).toMatch(/ask the operator first, unless the Session has Full access/);
+    expect(note).toMatch(/always ask, in every Access mode/);
+  });
+
+  it('summarises an environment change by the variable names and never the values', () => {
+    const ask = { service: 'Render', tool: 'update_environment_variables', destructive: true };
+    const summary = askSummary(ask, {
+      serviceId: 'srv-abc123',
+      envVars: [
+        { key: 'DATABASE_URL', value: 'postgres://u:marker-value-1@db.example.com/app' },
+        { key: 'STRIPE_KEY', value: 'marker-value-2' },
+      ],
+    });
+    expect(summary).toBe('update_environment_variables, serviceId srv-abc123, envVars DATABASE_URL, STRIPE_KEY');
+    expect(summary).not.toContain('marker-value');
+    // Any array of key and value pairs reads the same, whatever the other fields are called.
+    expect(
+      askSummary(ask, { variables: [{ key: 'A', value: 'marker-value-3', name: 'ignored-marker-name' }] }),
+    ).not.toContain('marker-value-3');
+    expect(askSummary(ask, { envVars: [{ key: 'A', value: 'marker-value-4' }], replace: true })).not.toContain(
+      'marker-value-4',
+    );
+  });
+
+  it('caps the variable names and the SQL, and redacts a secret in the SQL', () => {
+    const ask = { service: 'Render', tool: 'query_render_postgres', destructive: false };
+    const sql = askSummary(ask, { postgresId: 'dpg-1', sql: `SELECT * FROM users WHERE note = '${'x'.repeat(5000)}'` });
+    expect(sql.startsWith('query_render_postgres, postgresId dpg-1, "SELECT * FROM users')).toBe(true);
+    expect(sql.length).toBeLessThan(220);
+    expect(sql).toContain('…');
+    expect(askSummary(ask, { sql: 'SELECT 1 /* token=hunter2 */' })).not.toContain('hunter2');
+    const many = Array.from({ length: 200 }, (_, index) => ({ key: `VARIABLE_${index}`, value: 'v' }));
+    expect(askSummary({ ...ask, tool: 'update_environment_variables' }, { envVars: many }).length).toBeLessThan(220);
+  });
+});

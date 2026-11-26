@@ -2,7 +2,7 @@
 
 Connection passwords, tokens and service-account keys live in the macOS Keychain under the service
 `ops-console`, keyed `connection:<id>`; an MCP Server's env vars are keyed `mcp:<name>`, the GitHub
-Connector's `gh` token and each Google Connector's client and refresh token included; the Loki logs Connector's own Grafana sign-in, the client the console registered and its tokens, is one item keyed
+Connector's `gh` token, the Render Connector's API key and each Google Connector's client and refresh token included; the Loki logs Connector's own Grafana sign-in, the client the console registered and its tokens, is one item keyed
 `connection:loki_logs_oauth`; the New Relic User API key, when New Relic logs are read through its API, is
 `connection:new_relic_logs` ([ADR 0005](0005-claude-code-is-the-integration-layer.md)); the CLIProxy API key is `cliproxy:api-key`. `state.db` holds only the Connection's non-secret fields. Secrets are read at the moment of use and never reach the database,
 logs, WebSocket payloads or the browser.

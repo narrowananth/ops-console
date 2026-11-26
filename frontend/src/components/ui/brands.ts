@@ -186,6 +186,12 @@ export const BRANDS = {
     // An S of three bars, drawn here, not a third-party logo.
     path: 'M4 4h16v4H8v2h12v10H4v-4h12v-2H4z',
   },
+  render: {
+    title: 'Render',
+    hex: '#4353FF',
+    // An R of blocks, drawn here, not a third-party logo.
+    path: 'M5 4h3v16H5zM8 4h9v3H8zM16 7h3v4h-3zM8 11h9v3H8zM12.5 14h3.5l3 6h-3.5z',
+  },
   newrelic: {
     title: 'New Relic logs',
     hex: '#1CE783',

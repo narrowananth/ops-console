@@ -11,8 +11,9 @@ already be added in Integrations without one, which is the route for local devel
 
 ## Today
 
-Nineteen Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
-Google Drive, four log sources (OpenTelemetry, CloudWatch, Loki, New Relic), Figma, which is read only, and Notion and Shortcut, whose changes ask. Render is next. Jira's Atlassian server also reaches
+Twenty Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
+Google Drive, four log sources (OpenTelemetry, CloudWatch, Loki, New Relic), Figma, which is read only, and Notion, Shortcut
+and Render, whose changes ask. Jira's Atlassian server also reaches
 Confluence. Database Connections cover Postgres, MongoDB, Redis, ClickHouse, Firebase and Kafka.
 
 ## The stack this plan assumes
@@ -52,7 +53,7 @@ Read from the console's own screens, not confirmed by the operator. Correct it a
 | 1 | Figma | First request: design to code from Sessions | Hosted MCP | 29 read tools only |
 | 2 | Notion | Requested: specs and docs in a Session | Hosted MCP | All tools: 21 read, 19 write found so far |
 | 3 | Shortcut | Requested: stories and iterations | Hosted MCP | All tools, classed by the words of the name |
-| 4 | Render | Requested: services, deploys, logs | Hosted MCP with an API key | All tools: 16 read, the rest write |
+| 4 | Render | Requested: services, deploys, logs | Hosted MCP with an API key, through `mcp-remote` | All tools: 32 read, 15 write, 3 destructive |
 | 5 | Firebase tools | Crashlytics issues and events for the mobile apps | Local MCP (`firebase mcp`) | All tools, Remote Config publish destructive |
 | 6 | Google Play | Crash and ANR rate, reviews, releases for Android | Console bridge, service account | Reads, review replies, release edits destructive |
 | 7 | App Store Connect | Builds, TestFlight, reviews for iOS | Console bridge, API key | Reads, review replies, submission destructive |
@@ -67,7 +68,7 @@ Items 5 to 12 are proposals. Each needs a yes from the operator that the service
 ## 0. Tool classes
 
 **Status:** built, in `agent/tool-classes.ts`. A server's policy is `read-only` (Figma: refuse what the Read list does not name) or
-`ask` (Notion, Shortcut: a write asks in every Access mode but `full`, a delete and any tool no class places ask in every mode; Notion names its tools, Shortcut classes them by the words of the name). The Approval is
+`ask` (Notion, Shortcut, Render: a write asks in every Access mode but `full`, a delete and any tool no class places ask in every mode; Notion and Render name their tools, Shortcut classes them by the words of the name). The Approval is
 a `command` one with an Action Log row before the call.
 
 ## 1. Figma
@@ -155,26 +156,37 @@ chose reads only.
 
 ## 4. Render
 
-- Route: hosted MCP at `https://mcp.render.com/mcp`, Streamable HTTP, with an API key sent as a bearer token.
-- Sign-in: an API key from the Render dashboard. Its "Read only" option grants Read on every resource, so the key is
-  limited at the source, but the full set of tools needs a key with Read and write, plus Run for deploys. Render documents
-  OAuth only through its own plugins.
+**Status:** built, Connect, the key handling and the lists. Run against no real Render account.
+
+- Route: hosted MCP at `https://mcp.render.com/mcp`, Streamable HTTP, with an API key sent as `Authorization: Bearer <key>`.
+  The console starts `npx -y mcp-remote https://mcp.render.com/mcp --header Authorization:${RENDER_AUTH}` through the
+  launcher, with `RENDER_AUTH=Bearer <key>` from the Keychain, so the key is in one process's environment and in no config
+  file, as GitHub's token is. `mcp-remote` starts from the immutable installs of
+  [mcp-package-installs](specs/mcp-package-installs.md).
+- Sign-in: an API key from the Render dashboard, pasted into the pane. Its "Read only" option grants Read on every resource;
+  the full set of tools needs Read and write. Render documents OAuth only through its own plugins.
 - Read tools: `list_workspaces`, `get_selected_workspace`, `select_workspace` (a choice held by the session, nothing
   stored at Render), `list_services`, `get_service`, `list_deploys`, `get_deploy`, `list_events`, `list_logs`,
   `list_log_label_values`, `get_metrics`, `list_postgres_instances`, `get_postgres`, `list_key_value`, `get_key_value`,
-  `get_blueprint`.
+  `get_blueprint`, and the workflow reads (`list_workflows`, `get_workflow`, `list_workflow_versions`,
+  `get_workflow_version`, `list_workflow_tasks`, `get_workflow_task`, `list_workflow_runs`, `get_workflow_run`,
+  `get_workflow_run_results`, `list_flows`, `get_flow`, `list_flow_runs`, `get_flow_run`, `get_flow_run_results`,
+  `list_flow_run_steps`, `get_flow_run_step`).
 - Write tools (ask): `create_web_service`, `create_static_site`, `create_cron_job`, `create_postgres`, `create_key_value`,
-  `update_environment_variables`, `run_cron_job`, `cancel_cron_job_run`, `create_blueprint`, `plan_blueprint`,
-  `update_blueprint`. `query_render_postgres` runs read-only SQL against a database and asks, as the console treats a
-  query on a Connection.
-- Destructive (always ask): `trigger_deploy` and `approve_blueprint`, which change running services. The spec checks
-  whether Render marks a service as production before relying on that line.
+  `run_cron_job`, `cancel_cron_job_run`, `create_blueprint`, `plan_blueprint`, `update_blueprint`, `create_workflow`,
+  `create_workflow_version`, `start_flow_run`, `cancel_flow_run`. `query_render_postgres` runs read-only SQL against a
+  database and asks, as the console treats a query on a Connection.
+- Destructive (always ask): `trigger_deploy`, `update_environment_variables` (it replaces the whole list) and
+  `approve_blueprint`, which change running services, and any tool not listed. Render has no delete tool.
+- The Approval and the Action Log row show variable names and never values, and the SQL capped and redacted.
 - Limits: none stated.
+- Spec: [render-connector](specs/render-connector.md).
 - Documentation:
   - [Render MCP server](https://render.com/docs/mcp-server)
   - [API keys and permissions](https://render.com/docs/api-keys)
   - [REST API](https://render.com/docs/api)
   - [Server repository and tool list](https://github.com/render-oss/render-mcp-server)
+  - [mcp-remote](https://github.com/geelen/mcp-remote)
 
 ## 5. Firebase tools (Crashlytics)
 
@@ -282,6 +294,6 @@ On demand, each after a yes. Each offers all its tools under the classes of rule
 
 ## What each item needs from the operator
 
-A sign-in in their own browser for Figma, Notion, Shortcut, PagerDuty and Render if OAuth is used; an API token for Render,
+A sign-in in their own browser for Figma, Notion, Shortcut and PagerDuty; an API key for Render; an API token for
 Terraform and Zeplin; a service account for Google Play; an App Store Connect key for the iOS reads. The console cannot create
 any of these, and none is requested until that item's turn.

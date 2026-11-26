@@ -9,8 +9,8 @@ import { redact } from '../action-log/redact';
  * - `read-only` (Figma): every tool off the list is refused with no Approval. `writes` are the tools known to change
  *   things, left out of the run's tool list; the list of reads is what refuses the rest, so a tool the vendor adds
  *   later is refused until the list names it.
- * - `ask` (Notion, Shortcut): a write asks the operator in every Access mode but `full`. A delete, and any tool no
- *   class places, asks in every Access mode. The classes are lists of tool names (Notion), or for a server that
+ * - `ask` (Notion, Shortcut, Render): a write asks the operator in every Access mode but `full`. A delete, and any tool no
+ *   class places, asks in every Access mode. The classes are lists of tool names (Notion, Render), or for a server that
  *   publishes no names, `verbs`: words of the tool name, split at `-` and `_`. The first group with a word in the
  *   name wins: destructive, then write, then read.
  */
@@ -171,6 +171,66 @@ const CLASSES: Record<string, ToolClasses> = {
       read: ['get', 'search', 'list', 'find', 'read', 'whoami', 'current'],
     },
   },
+  [serverOf(ConnectorId.Render)]: {
+    service: 'Render',
+    policy: 'ask',
+    alias: /^(claude_ai_render|plugin_render_render)$/i,
+    reads: [
+      'list_workspaces',
+      'get_selected_workspace',
+      // The server holds the choice for the session; nothing is stored at Render.
+      'select_workspace',
+      'list_services',
+      'get_service',
+      'list_deploys',
+      'get_deploy',
+      'list_events',
+      'list_logs',
+      'list_log_label_values',
+      'get_metrics',
+      'list_postgres_instances',
+      'get_postgres',
+      'list_key_value',
+      'get_key_value',
+      'get_blueprint',
+      'list_workflows',
+      'get_workflow',
+      'list_workflow_versions',
+      'get_workflow_version',
+      'list_workflow_tasks',
+      'get_workflow_task',
+      'list_workflow_runs',
+      'get_workflow_run',
+      'get_workflow_run_results',
+      'list_flows',
+      'get_flow',
+      'list_flow_runs',
+      'get_flow_run',
+      'get_flow_run_results',
+      'list_flow_run_steps',
+      'get_flow_run_step',
+    ],
+    writes: [
+      // Read-only SQL, but a query on a database: it asks.
+      'query_render_postgres',
+      'create_web_service',
+      'create_static_site',
+      'create_cron_job',
+      'create_postgres',
+      'create_key_value',
+      'run_cron_job',
+      'cancel_cron_job_run',
+      'create_blueprint',
+      'plan_blueprint',
+      'update_blueprint',
+      'create_workflow',
+      'create_workflow_version',
+      'start_flow_run',
+      'cancel_flow_run',
+    ],
+    // `update_environment_variables` replaces the whole list. Render has no delete tool; one added later is unlisted.
+    destructive: ['trigger_deploy', 'update_environment_variables', 'approve_blueprint'],
+  },
 };
 
 const full = (server: string, tool: string) => `mcp__${server}__${tool}`;
@@ -255,14 +315,30 @@ export const CLASSED_SERVERS = Object.keys(CLASSES);
 const CAP = 120;
 const PIECES = 5;
 /** The inputs that say what a call acts on and what it writes: ids, titles and text. */
-const MAIN_INPUT = /^(?:.*_ids?|.*[a-z]Ids?|ids?|title|name|text|content|new_str|comment|rich_text|query)$/;
+const MAIN_INPUT = /^(?:.*_ids?|.*[a-z]Ids?|ids?|title|name|text|content|new_str|comment|rich_text|query|sql)$/;
 const IS_ID = /(?:^|_)ids?$|[a-z]Ids?$/;
 
 const cap = (text: string) => (text.length > CAP ? `${text.slice(0, CAP)}…` : text);
 
+/** The names of a list of `{ key, value }` pairs, such as environment variables; null for any other value. */
+function pairNames(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const names: string[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== 'object' || !('value' in item) || !('key' in item)) return null;
+    if (typeof item.key !== 'string') return null;
+    names.push(item.key);
+  }
+  return names;
+}
+
 function mainInputs(value: unknown, key: string, depth: number, out: string[]): void {
   if (out.length >= PIECES) return;
-  if (typeof value === 'string' || typeof value === 'number') {
+  const names = pairNames(value);
+  if (names) {
+    // A list of pairs shows its names only: the values are the secrets.
+    out.push(`${key} ${cap(redact(names.join(', ')))}`);
+  } else if (typeof value === 'string' || typeof value === 'number') {
     if (MAIN_INPUT.test(key))
       out.push(IS_ID.test(key) ? `${key} ${cap(redact(String(value)))}` : `"${cap(redact(String(value)))}"`);
   } else if (Array.isArray(value)) {

@@ -954,6 +954,187 @@ describe('Shortcut Connector, tool classes by the words of the name', () => {
   });
 });
 
+describe('Render Connector, tool classes by lists', () => {
+  const MARKER = 'marker-value-7f3c9';
+  const read: Step = { tool: 'mcp__render__list_services', input: { limit: 20 } };
+  const write: Step = {
+    tool: 'mcp__render__create_cron_job',
+    input: { name: 'nightly-report', schedule: '0 3 * * *' },
+  };
+  const sql: Step = {
+    tool: 'mcp__render__query_render_postgres',
+    input: { postgresId: 'dpg-abc', sql: 'SELECT count(*) FROM orders' },
+  };
+  const env: Step = {
+    tool: 'mcp__render__update_environment_variables',
+    input: {
+      serviceId: 'srv-abc123',
+      envVars: [
+        { key: 'DATABASE_URL', value: `postgres://u:${MARKER}@db.example.com/app` },
+        { key: 'FEATURE_FLAG', value: MARKER },
+      ],
+    },
+  };
+  const deploy: Step = { tool: 'mcp__render__trigger_deploy', input: { serviceId: 'srv-abc123' } };
+  const unlisted: Step = { tool: 'mcp__render__delete_service', input: { serviceId: 'srv-abc123' } };
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const denied = (daemon: AgentDaemon) =>
+    (
+      calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors)
+        .set({ status })
+        .where(eq(connectors.id, 'render' as ConnectorId))
+        .run();
+    });
+
+  it('a read runs with no Approval in auto and full access', async () => {
+    const daemon = await start();
+    for (const mode of [AccessMode.Auto, AccessMode.Full]) {
+      expect((await runTool(daemon, mode, read)).approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([
+      'mcp__render__list_services',
+      'mcp__render__list_services',
+    ]);
+  });
+
+  it('asks once about a write and about SQL on a database in every mode but full, and runs them only after a yes', async () => {
+    const daemon = await start();
+    let asked = 0;
+    for (const step of [write, sql]) {
+      for (const mode of [AccessMode.Supervised, AccessMode.AcceptEdits, AccessMode.Auto]) {
+        asked += 1;
+        const { approvals } = await runTool(daemon, mode, step, 'approved');
+        expect(approvals, mode).toHaveLength(asked);
+        expect(daemon.sdk.ran, mode).toHaveLength(asked);
+      }
+    }
+    expect(await api(daemon).get('/approvals')).toMatchObject({
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'command',
+            status: 'approved',
+            summary: 'Render: query_render_postgres, postgresId dpg-abc, "SELECT count(*) FROM orders"',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('a denied write never runs', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, write, 'denied');
+    expect(approvals).toEqual([expect.objectContaining({ status: 'denied' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('runs a write in full access at once with no Approval, and logs it before the call', async () => {
+    const daemon = await start();
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ ...write, hold });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    const [row] = await until(
+      async () => (await api(daemon).get('/action-log')).body.data,
+      (rows) => rows.length === 1,
+      'the Action Log row',
+    );
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(row).toMatchObject({ kind: 'query', target: 'Render', outcome: 'pending', is_prod: false });
+    expect(row.command).toBe('create_cron_job, "nightly-report"');
+    release();
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__render__create_cron_job']);
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
+  });
+
+  it('asks about a deploy, an environment change and an unlisted tool in every mode, full included', async () => {
+    const daemon = await start();
+    for (const [done, step] of [deploy, env, unlisted].entries()) {
+      const { approvals } = await runTool(daemon, AccessMode.Full, step, 'approved');
+      expect(approvals).toHaveLength(done + 1);
+      expect(daemon.sdk.ran).toHaveLength(done + 1);
+    }
+    const { approvals } = await runTool(daemon, AccessMode.Full, deploy, 'denied');
+    expect(approvals).toHaveLength(4);
+    expect(daemon.sdk.ran).toHaveLength(3);
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Render: trigger_deploy, serviceId srv-abc123' })]),
+    );
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Render: delete_service, serviceId srv-abc123' })]),
+    );
+  });
+
+  it('shows the variable names of an environment change in the Approval and the Action Log, never a value', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Full, env, 'approved');
+    const wanted = 'Render: update_environment_variables, serviceId srv-abc123, envVars DATABASE_URL, FEATURE_FLAG';
+    expect(approvals).toEqual([expect.objectContaining({ summary: wanted })]);
+    const rows = (await api(daemon).get('/action-log')).body.data;
+    expect(rows).toEqual([
+      expect.objectContaining({
+        target: 'Render',
+        command: 'update_environment_variables, serviceId srv-abc123, envVars DATABASE_URL, FEATURE_FLAG',
+      }),
+    ]);
+    // Nothing the operator or the console stored about the call holds a value.
+    expect(JSON.stringify(approvals)).not.toContain(MARKER);
+    expect(JSON.stringify(rows)).not.toContain(MARKER);
+  });
+
+  it('starts its server for a chat and for no job, and no pull request Session', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'list the services');
+    expect(denied(daemon)).not.toContain('render');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('render');
+      expect(append(daemon), purpose).not.toMatch(/render/i);
+    }
+    const pr = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, pr)).run();
+    });
+    await converse(daemon, pr, 'review it');
+    expect(denied(daemon)).toContain('render');
+    expect(append(daemon)).not.toMatch(/render/i);
+  });
+
+  it('tells the agent the lists only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/render/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toMatch(/Render can be read and changed/);
+    expect(append(daemon)).toContain('mcp__render__list_services');
+    expect(append(daemon)).toMatch(/always ask, in every Access mode/);
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/render/i);
+  });
+});
+
 describe('Loki and New Relic MCP servers', () => {
   const kept = (purpose: RunPurpose, source: LogSource | null) => {
     const scope = mcpScope(purpose, false, source);

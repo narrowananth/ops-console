@@ -902,7 +902,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           target: CheckTarget.McpServer,
           id: name,
           status: server?.status === 'connected' ? HealthStatus.Ok : server ? HealthStatus.Auth : HealthStatus.Fail,
-          detail: server?.error ?? null,
+          detail: server?.error ? scrub(server.error, envSecrets(this.envs.get(name) ?? {})) : null,
           latency_ms: null,
         });
       }
@@ -993,7 +993,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
         states.find((s) => s.status !== HealthStatus.Auth) ??
         states[0] ?? { status: HealthStatus.Fail, detail: 'no signed-in Claude account', tools: [] as string[] };
       const enabled = !disabled.has(name);
-      const secrets = [...Object.values(entry.headers), ...Object.values(unwrapped ? await this.storedEnv(name) : {})];
+      const secrets = [...Object.values(entry.headers), ...envSecrets(unwrapped ? await this.storedEnv(name) : {})];
       out.push({
         name,
         scope: projectItem ? McpScope.Project : entry.scope,
@@ -1117,6 +1117,12 @@ function toAdd(entry: RegisteredServer): McpServerToAdd {
 /** A blank value in an edit keeps the stored one. */
 function nonBlank(values: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
+}
+
+/** The env var values to scrub, and for a `Bearer <token>` value the token alone, which a server may echo by itself. */
+function envSecrets(env: Record<string, string>): string[] {
+  const values = Object.values(env);
+  return [...values, ...values.map((value) => value.replace(/^Bearer\s+/i, ''))];
 }
 
 /** No response carries an env var or header value (Behavior 15). */

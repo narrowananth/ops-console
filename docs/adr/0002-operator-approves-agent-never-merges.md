@@ -40,12 +40,12 @@ own git access, never forced. A branch that moved on origin is rebased onto the 
 stops with the branch untouched. When the branch has a pull request already, the push updates it. The agent never pushes
 or opens one itself: it is told so, and `git push` is denied in the PR Session and a Verification.
 
-The agent also changes services outside this Mac, Notion and Shortcut, only by asking. Their tools are sorted into Tool
+The agent also changes services outside this Mac, Notion, Shortcut and Render, only by asking. Their tools are sorted into Tool
 classes: a read runs, a write raises an Approval in every Access mode but full, and a delete, or any tool no class
-places, raises one in every mode, full included. Notion's classes are lists of names; Shortcut's server publishes none,
+places, raises one in every mode, full included. Notion's and Render's classes are lists of names; Shortcut's server publishes none,
 so a rule on the words of the tool name places them. The Approval is a `command` one with no PROD tag, and an Action Log row, holding the
 tool and a capped, redacted summary of its main inputs, is written before the call. A no is final, as for `save_file`.
-Jobs and a pull request's Session reach no Notion or Shortcut server, so text from logs or a pull request starts no call there. Figma
+Jobs and a pull request's Session reach no Notion, Shortcut or Render server, so text from logs or a pull request starts no call there. Figma
 is read only instead: every tool off its Read list is refused with no Approval.
 
 A file for the operator goes in the Session's output folder, where the console shows it. To put a copy in another
@@ -155,9 +155,9 @@ another Repo, a Spawned Session cannot start others, and the tool is offered onl
 in a job that read log or pull request text.
 
 A Session in full access can have the daemon run an integration write as the operator, start a process outside the
-sandbox, move into a Repo, start a batch of Sessions, save a file outside its folders or change Notion pages or Shortcut stories with no
+sandbox, move into a Repo, start a batch of Sessions, save a file outside its folders or change Notion pages, Shortcut stories or Render services with no
 click. Steered by text it read, it could do any of these; the operator who set Full access chose that, and a PROD write, a
-Notion or Shortcut delete and a tool no class places still ask.
+Notion or Shortcut delete, a Render deploy or environment change and a tool no class places still ask.
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination,
 which the card says, refuses a folder whose name is taken, and checks nothing else about the destination but that it

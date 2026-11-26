@@ -446,13 +446,13 @@ A short Agent SDK session that reads which MCP Servers connect and which tools t
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs, Figma, Notion, Shortcut. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic, or, for New Relic logs when the operator gives a User API key, through New Relic's own API. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs, Figma, Notion, Shortcut, Render. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic, or, for New Relic logs when the operator gives a User API key, through New Relic's own API. All are connected, checked and disconnected in Integrations, the one place a source is connected.
 
 **Read list**:
 The tools of a Connector's MCP Server that a run may call. The console refuses every other tool of that server, so a server with no read-only mode of its own is still read only. Figma's is the only one so far.
 
 **Tool class**:
-Whether a tool of a server with classes reads, writes or deletes. A read runs, a write asks except in full access, a delete and any tool no class places always ask. The classes are a list of tool names (Notion), or for a server that publishes none, a rule on the words of the name (Shortcut). Figma keeps its Read list, which refuses instead of asking.
+Whether a tool of a server with classes reads, writes or deletes. A read runs, a write asks except in full access, a delete and any tool no class places always ask. The classes are a list of tool names (Notion, Render), or for a server that publishes none, a rule on the words of the name (Shortcut). Figma keeps its Read list, which refuses instead of asking.
 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.

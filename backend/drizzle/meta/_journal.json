@@ -400,6 +400,13 @@
       "when": 1795707154754,
       "tag": "0056_connector_shortcut",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1795708027745,
+      "tag": "0057_connector_render",
+      "breakpoints": true
     }
   ]
 }

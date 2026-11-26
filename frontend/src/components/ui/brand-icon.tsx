@@ -30,6 +30,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.Figma]: 'figma',
   [ConnectorId.Notion]: 'notion',
   [ConnectorId.Shortcut]: 'shortcut',
+  [ConnectorId.Render]: 'render',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
@@ -57,6 +58,7 @@ const SERVER_HINTS: [RegExp, BrandSlug][] = [
   [/kafka/, 'apachekafka'],
   [/notion/, 'notion'],
   [/shortcut/, 'shortcut'],
+  [/\brender\b/, 'render'],
   [/linear/, 'linear'],
   [/figma/, 'figma'],
   [/stripe/, 'stripe'],
