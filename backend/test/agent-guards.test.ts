@@ -812,6 +812,148 @@ describe('Notion Connector, tool classes', () => {
   });
 });
 
+describe('Shortcut Connector, tool classes by the words of the name', () => {
+  const write: Step = {
+    tool: 'mcp__shortcut__stories-update',
+    input: { story_id: 1234, name: 'Fix the cart' },
+  };
+  const destroy: Step = { tool: 'mcp__shortcut__epics-delete', input: { epic_id: 7 } };
+  const unplaced: Step = { tool: 'mcp__shortcut__iterations-frobnicate', input: { iteration_id: 9 } };
+  const read: Step = { tool: 'mcp__shortcut__stories-get-by-id', input: { story_id: 1234 } };
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const denied = (daemon: AgentDaemon) =>
+    (
+      calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors).set({ status }).where(eq(connectors.id, ConnectorId.Shortcut)).run();
+    });
+
+  it('a read runs with no Approval in auto and full access', async () => {
+    const daemon = await start();
+    for (const mode of [AccessMode.Auto, AccessMode.Full]) {
+      expect((await runTool(daemon, mode, read)).approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([
+      'mcp__shortcut__stories-get-by-id',
+      'mcp__shortcut__stories-get-by-id',
+    ]);
+  });
+
+  it('asks once about a write in every mode but full, and runs it only after a yes', async () => {
+    const daemon = await start();
+    const modes = [AccessMode.Supervised, AccessMode.AcceptEdits, AccessMode.Auto];
+    for (const [done, mode] of modes.entries()) {
+      const { approvals } = await runTool(daemon, mode, write, 'approved');
+      expect(approvals, mode).toHaveLength(done + 1);
+      expect(daemon.sdk.ran, mode).toHaveLength(done + 1);
+    }
+    expect(await api(daemon).get('/approvals')).toMatchObject({
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'command',
+            status: 'approved',
+            summary: 'Shortcut: stories-update, story_id 1234, "Fix the cart"',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('a denied write never runs', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, write, 'denied');
+    expect(approvals).toEqual([expect.objectContaining({ status: 'denied' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('runs a write in full access at once with no Approval, and logs it before the call', async () => {
+    const daemon = await start();
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ ...write, hold });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    const [row] = await until(
+      async () => (await api(daemon).get('/action-log')).body.data,
+      (rows) => rows.length === 1,
+      'the Action Log row',
+    );
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(row).toMatchObject({ kind: 'query', target: 'Shortcut', outcome: 'pending', is_prod: false });
+    expect(row.command).toBe('stories-update, story_id 1234, "Fix the cart"');
+    release();
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__shortcut__stories-update']);
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
+  });
+
+  it('asks about a delete and about a name no group places in every mode, full included', async () => {
+    const daemon = await start();
+    for (const [done, step] of [destroy, unplaced].entries()) {
+      const { approvals } = await runTool(daemon, AccessMode.Full, step, 'approved');
+      expect(approvals).toHaveLength(done + 1);
+      expect(daemon.sdk.ran).toHaveLength(done + 1);
+    }
+    const { approvals } = await runTool(daemon, AccessMode.Full, destroy, 'denied');
+    expect(approvals).toHaveLength(3);
+    expect(daemon.sdk.ran).toHaveLength(2);
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Shortcut: epics-delete, epic_id 7' })]),
+    );
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Shortcut: iterations-frobnicate, iteration_id 9' })]),
+    );
+  });
+
+  it('starts its server for a chat and for no job, and no pull request Session', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'read the story');
+    expect(denied(daemon)).not.toContain('shortcut');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('shortcut');
+      expect(append(daemon), purpose).not.toMatch(/shortcut/i);
+    }
+    const pr = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, pr)).run();
+    });
+    await converse(daemon, pr, 'review it');
+    expect(denied(daemon)).toContain('shortcut');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+  });
+
+  it('tells the agent the rule only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toMatch(/Shortcut can be read and changed/);
+    expect(append(daemon)).toMatch(/always asks/);
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+  });
+});
+
 describe('Loki and New Relic MCP servers', () => {
   const kept = (purpose: RunPurpose, source: LogSource | null) => {
     const scope = mcpScope(purpose, false, source);

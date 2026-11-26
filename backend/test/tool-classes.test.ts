@@ -216,3 +216,124 @@ describe('the tool classes of the Notion server (ask)', () => {
     expect(askSummary(ask, {})).toBe('notion-update-page');
   });
 });
+
+const SHORTCUT_READS = [
+  'stories-get-by-id',
+  'stories-search',
+  'stories-get-history',
+  'stories-get-branch-name',
+  'epics-get-by-id',
+  'whoami',
+  'get_story',
+  'search_stories',
+  'iterations-list',
+];
+
+const SHORTCUT_WRITES = [
+  'stories-create',
+  'stories-update',
+  'stories-create-comment',
+  'stories-upload-file',
+  // `assign` is a write word and comes before the read word `current`.
+  'stories-assign-current-user',
+  'stories-add-task',
+  'stories-add-relation',
+  'epics-create-comment',
+  'create_story',
+  'update_story',
+];
+
+const SHORTCUT_DELETES = [
+  'epics-delete',
+  'stories-remove-subtask',
+  'stories-remove-external-link',
+  'stories-archive',
+  'stories-update-and-archive',
+  'delete_story',
+  // A delete word wins over a read word.
+  'stories-get-and-delete',
+];
+
+describe('the tool classes of the Shortcut server (ask, by the words of the name)', () => {
+  it('lets a read through and asks about nothing', () => {
+    for (const tool of SHORTCUT_READS) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toBeNull();
+      expect(toolRefusal(`mcp__shortcut__${tool}`), tool).toBeNull();
+    }
+  });
+
+  it('asks about a write, which full access skips', () => {
+    for (const tool of SHORTCUT_WRITES) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: false });
+    }
+  });
+
+  it('asks about a delete in every mode, and so does a name no group places', () => {
+    for (const tool of [...SHORTCUT_DELETES, 'iterations-frobnicate', 'x', 'stories', 'getstory']) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: true });
+    }
+  });
+
+  it('splits at hyphens and underscores only, whatever the case, so a word inside another word is no match', () => {
+    expect(toolAsk('mcp__shortcut__Stories-GET-By-Id')).toBeNull();
+    expect(toolAsk('mcp__shortcut__STORIES_CREATE')).toMatchObject({ destructive: false });
+    // `getter` and `updated` are not the words `get` and `update`.
+    expect(toolAsk('mcp__shortcut__stories-getter')).toMatchObject({ destructive: true });
+    expect(toolAsk('mcp__shortcut__stories-updated')).toMatchObject({ destructive: true });
+  });
+
+  it('holds under the other names Shortcut’s server can carry, whatever the case', () => {
+    for (const server of ['Shortcut', 'claude_ai_Shortcut', 'plugin_shortcut_shortcut']) {
+      expect(toolAsk(`mcp__${server}__stories-create`), server).toMatchObject({ destructive: false });
+      expect(toolAsk(`mcp__${server}__epics-delete`), server).toMatchObject({ destructive: true });
+      expect(toolAsk(`mcp__${server}__stories-search`), server).toBeNull();
+    }
+  });
+
+  it('reads the server and the tool apart at the first double underscore after the server name', () => {
+    expect(toolAsk('mcp__shortcut__stories__create')).toEqual({
+      service: 'Shortcut',
+      tool: 'stories__create',
+      destructive: false,
+    });
+    expect(toolAsk('mcp__my__shortcut__epics-delete')).toBeNull();
+  });
+
+  it('leaves the tools of every other server and the agent’s own tools alone, and Notion keeps its lists', () => {
+    for (const tool of ['mcp__sentry__update_issue', 'mcp__shortcut-notes__create', 'mcp__shortcutx__a', 'Bash']) {
+      expect(toolAsk(tool), tool).toBeNull();
+    }
+    // The words of the Shortcut rule do not reach Notion: a name outside its lists asks as a delete, a listed read runs.
+    expect(toolAsk('mcp__notion__notion-get-files')).toMatchObject({ destructive: true });
+    expect(toolAsk('mcp__notion__notion-fetch')).toBeNull();
+  });
+
+  it('is never refused, and is not left out of the run’s tool list', () => {
+    expect(toolRefusal('mcp__shortcut__epics-delete')).toBeNull();
+    expect(toolRefusals().filter((rule) => rule.startsWith('mcp__shortcut__'))).toEqual([]);
+  });
+
+  it('tells the agent the rule in words, with no tool names', () => {
+    const note = toolNote('shortcut');
+    expect(note).toMatch(
+      /delete, remove, archive, destroy in it deletes or archives and always asks.*every Access mode/,
+    );
+    expect(note).toMatch(
+      /create, update, add.*changes things and asks the operator first, unless the Session has Full access/,
+    );
+    expect(note).toMatch(/get, search, list.*reads and runs/);
+    expect(note).toMatch(/cannot place.*always asks/);
+    expect(note).not.toContain('mcp__shortcut__stories');
+  });
+
+  it('summarises a call by the story, epic or iteration it acts on, in either id style', () => {
+    const ask = { service: 'Shortcut', tool: 'stories-update', destructive: false };
+    expect(askSummary(ask, { story_id: 1234, name: 'Fix the cart', description: 'long body' })).toBe(
+      'stories-update, story_id 1234, "Fix the cart"',
+    );
+    expect(askSummary(ask, { storyPublicId: 1234, epicPublicId: 7, text: 'Looks good' })).toBe(
+      'stories-update, storyPublicId 1234, epicPublicId 7, "Looks good"',
+    );
+    expect(askSummary(ask, { iteration_id: 9, comment: 'x'.repeat(5000) }).length).toBeLessThan(200);
+  });
+});

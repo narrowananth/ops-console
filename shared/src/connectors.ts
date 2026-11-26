@@ -27,6 +27,8 @@ export enum ConnectorId {
   Figma = 'figma',
   /** Notion's pages and databases, through its hosted MCP server. Its tools are sorted into Tool classes: a change asks, a delete always asks. */
   Notion = 'notion',
+  /** Shortcut's stories, epics and iterations, through its hosted MCP server. Its tool names are unpublished, so the Tool classes are a rule on the words of the name. */
+  Shortcut = 'shortcut',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -69,6 +71,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.NewRelicLogs]: 'New Relic logs',
   [ConnectorId.Figma]: 'Figma',
   [ConnectorId.Notion]: 'Notion',
+  [ConnectorId.Shortcut]: 'Shortcut',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -91,6 +94,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.NewRelicLogs]: 'New Relic MCP',
   [ConnectorId.Figma]: 'Figma MCP',
   [ConnectorId.Notion]: 'Notion MCP',
+  [ConnectorId.Shortcut]: 'Shortcut MCP',
 };
 
 /**
@@ -154,6 +158,8 @@ export const CONNECTOR_SERVERS: Partial<
   [ConnectorId.Figma]: { name: 'figma', transport: McpTransport.Http, target: 'https://mcp.figma.com/mcp' },
   // Notion's hosted server registers its own OAuth client (dynamic client registration), so none is pinned here.
   [ConnectorId.Notion]: { name: 'notion', transport: McpTransport.Http, target: 'https://mcp.notion.com/mcp' },
+  // Shortcut's hosted server takes the sign-in of Claude Code's own client, so none is pinned here.
+  [ConnectorId.Shortcut]: { name: 'shortcut', transport: McpTransport.Http, target: 'https://mcp.shortcut.com/mcp' },
   // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
   [ConnectorId.CloudWatchLogs]: {
     name: 'cloudwatch',
@@ -275,6 +281,7 @@ export const connectorConfigSchemas = {
   }),
   [ConnectorId.Figma]: z.strictObject({}),
   [ConnectorId.Notion]: z.strictObject({}),
+  [ConnectorId.Shortcut]: z.strictObject({}),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -351,6 +358,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
   },
   [ConnectorId.Figma]: {},
   [ConnectorId.Notion]: {},
+  [ConnectorId.Shortcut]: {},
 };
 
 /**

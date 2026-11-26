@@ -393,6 +393,13 @@
       "when": 1795704622496,
       "tag": "0055_connector_notion",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1795707154754,
+      "tag": "0056_connector_shortcut",
+      "breakpoints": true
     }
   ]
 }

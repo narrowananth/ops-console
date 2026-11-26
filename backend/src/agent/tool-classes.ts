@@ -9,18 +9,26 @@ import { redact } from '../action-log/redact';
  * - `read-only` (Figma): every tool off the list is refused with no Approval. `writes` are the tools known to change
  *   things, left out of the run's tool list; the list of reads is what refuses the rest, so a tool the vendor adds
  *   later is refused until the list names it.
- * - `ask` (Notion): a `writes` tool asks the operator in every Access mode but `full`. A `destructive` tool, and any tool
- *   no list names, asks in every Access mode.
+ * - `ask` (Notion, Shortcut): a write asks the operator in every Access mode but `full`. A delete, and any tool no
+ *   class places, asks in every Access mode. The classes are lists of tool names (Notion), or for a server that
+ *   publishes no names, `verbs`: words of the tool name, split at `-` and `_`. The first group with a word in the
+ *   name wins: destructive, then write, then read.
  */
+type Verbs = { destructive: string[]; write: string[]; read: string[] };
+
 type ToolClasses = {
   service: string;
   /** Other names the same vendor's server arrives under: a plugin, a claude.ai connector, the desktop server. */
   alias: RegExp;
-  reads: string[];
-  writes: string[];
   /** What the agent does when the vendor refuses a call, told with the note. */
   onRefusal?: string;
-} & ({ policy: 'read-only' } | { policy: 'ask'; destructive: string[] });
+} & (
+  | { policy: 'read-only'; reads: string[]; writes: string[] }
+  | { policy: 'ask'; reads: string[]; writes: string[]; destructive: string[] }
+  | { policy: 'ask'; verbs: Verbs }
+);
+
+type ToolClass = 'read' | 'write' | 'destructive';
 
 const serverOf = (id: ConnectorId): string => (CONNECTOR_SERVERS[id] as { name: string }).name;
 
@@ -134,6 +142,35 @@ const CLASSES: Record<string, ToolClasses> = {
     ],
     destructive: ['notion-delete-pages', 'notion-delete-databases', 'notion-delete-comment'],
   },
+  [serverOf(ConnectorId.Shortcut)]: {
+    service: 'Shortcut',
+    policy: 'ask',
+    alias: /^(claude_ai_shortcut|plugin_shortcut_shortcut)$/i,
+    verbs: {
+      destructive: ['delete', 'remove', 'archive', 'destroy'],
+      write: [
+        'create',
+        'update',
+        'add',
+        'set',
+        'assign',
+        'unassign',
+        'upload',
+        'move',
+        'merge',
+        'link',
+        'unlink',
+        'start',
+        'stop',
+        'run',
+        'cancel',
+        'apply',
+        'approve',
+        'publish',
+      ],
+      read: ['get', 'search', 'list', 'find', 'read', 'whoami', 'current'],
+    },
+  },
 };
 
 const full = (server: string, tool: string) => `mcp__${server}__${tool}`;
@@ -156,13 +193,28 @@ export function toolRefusal(toolName: string): string | null {
 /** A call that needs the operator's yes: `destructive` asks in every Access mode, a write in every mode but `full`. */
 export type ToolAsk = { service: string; tool: string; destructive: boolean };
 
+/** The class of a tool of an `ask` server. A name nothing places is destructive. */
+function classOf(classes: Extract<ToolClasses, { policy: 'ask' }>, tool: string): ToolClass {
+  if ('verbs' in classes) {
+    const words = tool.toLowerCase().split(/[-_]+/);
+    const has = (group: string[]) => words.some((word) => group.includes(word));
+    if (has(classes.verbs.destructive)) return 'destructive';
+    if (has(classes.verbs.write)) return 'write';
+    return has(classes.verbs.read) ? 'read' : 'destructive';
+  }
+  if (classes.reads.includes(tool)) return 'read';
+  return classes.writes.includes(tool) ? 'write' : 'destructive';
+}
+
 /** What `toolName` needs, when it is a tool of an `ask` server that is not a read; null otherwise. */
 export function toolAsk(toolName: string): ToolAsk | null {
   const call = mcpTool(toolName);
   if (!call) return null;
   const classes = classesFor(call.server);
-  if (classes?.policy !== 'ask' || classes.reads.includes(call.tool)) return null;
-  return { service: classes.service, tool: call.tool, destructive: !classes.writes.includes(call.tool) };
+  if (classes?.policy !== 'ask') return null;
+  const toolClass = classOf(classes, call.tool);
+  if (toolClass === 'read') return null;
+  return { service: classes.service, tool: call.tool, destructive: toolClass === 'destructive' };
 }
 
 /** The known write tools of every read-only server, for `disallowedTools`. */
@@ -176,6 +228,16 @@ export function toolRefusals(): string[] {
 export function toolNote(server: string): string {
   const classes = CLASSES[server] as ToolClasses;
   const names = (tools: string[]) => tools.map((tool) => full(server, tool)).join(', ');
+  if ('verbs' in classes) {
+    const { read, write, destructive } = classes.verbs;
+    return [
+      `${classes.service} can be read and changed. Its tools are sorted by the words of their names, split at - and _.`,
+      `A name with ${destructive.join(', ')} in it deletes or archives and always asks the operator, in every Access mode.`,
+      `Else a name with ${write.join(', ')} in it changes things and asks the operator first, unless the Session has Full access.`,
+      `Else a name with ${read.join(', ')} in it reads and runs.`,
+      `A tool the console cannot place always asks too.`,
+    ].join(' ');
+  }
   const reads = `Read it with ${names(classes.reads)}.`;
   if (classes.policy === 'read-only') {
     return `${classes.service} is read only here. ${reads} Any other ${classes.service} tool is refused and changes nothing.${classes.onRefusal ? ` ${classes.onRefusal}` : ''}`;
@@ -193,7 +255,8 @@ export const CLASSED_SERVERS = Object.keys(CLASSES);
 const CAP = 120;
 const PIECES = 5;
 /** The inputs that say what a call acts on and what it writes: ids, titles and text. */
-const MAIN_INPUT = /^(?:.*_ids?|ids?|title|name|text|content|new_str|comment|rich_text|query)$/;
+const MAIN_INPUT = /^(?:.*_ids?|.*[a-z]Ids?|ids?|title|name|text|content|new_str|comment|rich_text|query)$/;
+const IS_ID = /(?:^|_)ids?$|[a-z]Ids?$/;
 
 const cap = (text: string) => (text.length > CAP ? `${text.slice(0, CAP)}…` : text);
 
@@ -201,7 +264,7 @@ function mainInputs(value: unknown, key: string, depth: number, out: string[]): 
   if (out.length >= PIECES) return;
   if (typeof value === 'string' || typeof value === 'number') {
     if (MAIN_INPUT.test(key))
-      out.push(/(?:^|_)ids?$/.test(key) ? `${key} ${cap(redact(String(value)))}` : `"${cap(redact(String(value)))}"`);
+      out.push(IS_ID.test(key) ? `${key} ${cap(redact(String(value)))}` : `"${cap(redact(String(value)))}"`);
   } else if (Array.isArray(value)) {
     for (const item of value.slice(0, PIECES)) mainInputs(item, key, depth, out);
   } else if (value !== null && typeof value === 'object' && depth < 3) {

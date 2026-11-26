@@ -29,6 +29,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.NewRelicLogs]: 'newrelic',
   [ConnectorId.Figma]: 'figma',
   [ConnectorId.Notion]: 'notion',
+  [ConnectorId.Shortcut]: 'shortcut',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
@@ -55,6 +56,7 @@ const SERVER_HINTS: [RegExp, BrandSlug][] = [
   [/firebase|firestore/, 'firebase'],
   [/kafka/, 'apachekafka'],
   [/notion/, 'notion'],
+  [/shortcut/, 'shortcut'],
   [/linear/, 'linear'],
   [/figma/, 'figma'],
   [/stripe/, 'stripe'],

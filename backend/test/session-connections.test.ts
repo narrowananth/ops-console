@@ -364,7 +364,7 @@ describe('a PR Session', () => {
 
     // No .env yet: nothing is reached, as before.
     await ask(daemon, id, { text: 'ok' });
-    expect(denied(daemon)).toEqual(['figma', 'notion', ...Object.keys(all)].sort());
+    expect(denied(daemon)).toEqual(['figma', 'notion', 'shortcut', ...Object.keys(all)].sort());
     expect(append(daemon)).not.toContain('ops-result');
 
     // The Repo's file now names some: the next run reaches exactly those, found again, none stored.
@@ -378,6 +378,7 @@ describe('a PR Session', () => {
       'pg-prod',
       'pg-writer',
       'redis-local',
+      'shortcut',
     ]);
     expect(append(daemon)).toContain('pg-staging (read-only)');
     expect(append(daemon)).toContain('ops-result');
@@ -397,7 +398,7 @@ describe('a PR Session', () => {
     // The Repo's file changed: the next run follows it.
     await writeFile(path.join(repoDir(daemon, repo), '.env'), 'NOTHING=1\n');
     await ask(daemon, id, { text: 'ok' });
-    expect(denied(daemon)).toEqual(['figma', 'notion', ...Object.keys(all)].sort());
+    expect(denied(daemon)).toEqual(['figma', 'notion', 'shortcut', ...Object.keys(all)].sort());
   });
 
   it('shows the Connections it reaches as its connection_ids', async () => {
