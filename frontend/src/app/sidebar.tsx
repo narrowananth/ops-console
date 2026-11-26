@@ -60,12 +60,6 @@ const ICONS = {
       <path d="M6 7v10M18 17V10a3 3 0 0 0-3-3h-3M14 4l-2 3 2 3" />
     </>,
   ),
-  devtools: icon(
-    <>
-      <ellipse cx="12" cy="5" rx="8" ry="3" />
-      <path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
-    </>,
-  ),
   integrations: icon(<path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0zM12 17v4" />),
   connections: icon(<path d="M4 7h16M4 12h16M4 17h10" />),
   repos: icon(
@@ -97,7 +91,6 @@ export const PAGES = [
   { group: 'Operate', path: '/sessions', label: 'Sessions', icon: ICONS.sessions },
   { group: 'Operate', path: '/pull-requests', label: 'Pull requests', icon: ICONS.pullRequests },
   { group: 'Operate', path: '/monitor', label: 'Monitor', icon: ICONS.monitor },
-  { group: 'Operate', path: '/devtools', label: 'Dev tools', icon: ICONS.devtools },
   { group: 'Connect', path: '/integrations', label: 'Integrations', icon: ICONS.integrations },
   { group: 'Connect', path: '/connections', label: 'Connections', icon: ICONS.connections },
   { group: 'Connect', path: '/repos', label: 'Repos', icon: ICONS.repos },

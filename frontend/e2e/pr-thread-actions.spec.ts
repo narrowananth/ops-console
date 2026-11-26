@@ -1085,3 +1085,61 @@ test('a comment box and a thread under a diff line are as wide as the visible di
   const cancelBox = await page.getByRole('button', { name: 'Cancel' }).boundingBox();
   expect(cancelBox && cancelBox.x + cancelBox.width).toBeLessThanOrEqual(view.x + view.width + 1);
 });
+
+const UI_SHOTS = process.env.UI_FIXES_SHOTS;
+
+test('with every file collapsed, a click on a file in the tree opens that file only and scrolls to it', async ({
+  page,
+}) => {
+  const util = treeFile('src/util.ts');
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX, util] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  const files = page.getByRole('region', { name: 'Files' });
+  await expect(files.getByText('const t9 = 9;')).toBeHidden();
+
+  const tree = page.getByRole('navigation', { name: 'Files in this pull request' });
+  await tree.getByRole('button', { name: /^tax\.ts/ }).click();
+  await expect(files.getByText('const t9 = 9;')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'src/tax.ts' })).toBeInViewport();
+  await expect(tree.getByRole('button', { name: /^tax\.ts/ })).toHaveAttribute('aria-current', 'true');
+  await expect(files.getByText('if (!cart) return;')).toBeHidden();
+  await expect(files.getByText('export const a = 1;')).toBeHidden();
+  if (UI_SHOTS) await page.screenshot({ path: `${UI_SHOTS}/tree-click-opens-collapsed-file.png` });
+});
+
+test('a collapsed file’s three-dot menu opens over the next file, and its items work', async ({ page }) => {
+  await routePullRequest(page, { current: pullRequest({ files: [CART, TAX] }) });
+  await openPullRequest(page);
+  await page.getByRole('tab', { name: /^Files changed/ }).click();
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  const files = page.getByRole('region', { name: 'Files' });
+  await expect(files.getByText('if (!cart) return;')).toBeHidden();
+
+  await page.getByRole('button', { name: 'More for src/cart.ts' }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu).toBeVisible();
+  // Each entry is the topmost thing at its own centre: the next file's header does not cover it.
+  for (const name of ['View side-by-side', 'View entire file', 'Open in source ↗']) {
+    const item = menu.getByRole('menuitem', { name });
+    await expect(item).toBeVisible();
+    expect(
+      await item.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+      }),
+    ).toBe(true);
+  }
+  await expect(menu.getByRole('menuitem', { name: 'Open in source ↗' })).toHaveAttribute(
+    'href',
+    'https://github.com/example/checkout-api/blob/9c1e4b7d00000000000000000000000000000000/src/cart.ts',
+  );
+  if (UI_SHOTS) await page.screenshot({ path: `${UI_SHOTS}/collapsed-file-menu-open.png` });
+
+  // The click picks the entry, closes the menu and shows the file the choice applies to.
+  await menu.getByRole('menuitem', { name: 'View side-by-side' }).click();
+  await expect(menu).toBeHidden();
+  await expect(files.getByText('if (!cart) return;')).toBeVisible();
+  await expect(files.getByText('const t9 = 9;')).toBeHidden();
+});

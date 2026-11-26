@@ -3,7 +3,6 @@ export * from './api';
 export * from './browser';
 export * from './connections';
 export * from './connectors';
-export * from './devtools';
 export * from './errors';
 export * from './health-watch';
 export * from './mcp';

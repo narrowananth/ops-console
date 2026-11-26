@@ -861,15 +861,15 @@ export function useRemoveRepo() {
   });
 }
 
-/** The Sessions in a Repo and the anonymous ones, most recently active first. */
+/** The Sessions in a Repo, the anonymous ones and the earlier Dev tools ones, most recently active first. */
 export function useRepoSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
     queryFn: async () => {
       const read = (kind: string) =>
         apiGet(`/sessions?kind=${kind}&limit=100`, z.object({ data: z.array(sessionSchema) })).then((b) => b.data);
-      const [inRepos, anonymous] = await Promise.all([read('repo'), read('anonymous')]);
-      return [...inRepos, ...anonymous].sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
+      const kinds = await Promise.all([read('repo'), read('anonymous'), read('devtools')]);
+      return kinds.flat().sort((a, b) => b.last_active_at.localeCompare(a.last_active_at));
     },
   });
 }
@@ -1119,8 +1119,6 @@ export function useMessages(sessionId: string) {
       apiGet(`/sessions/${sessionId}/messages`, z.object({ data: z.array(messageSchema) })).then((b) =>
         withPendingSends(sessionId, b.data),
       ),
-    // Dev tools draws its terminal before the first question makes a Session.
-    enabled: sessionId !== '',
   });
 }
 
@@ -1736,42 +1734,6 @@ export function useCancelFix(id: string) {
   return useMutation({
     mutationFn: () => apiSend('POST', `/fixes/${id}/cancel`, undefined, z.object({ data: fixSchema })),
     onSuccess: () => refreshMonitor(client),
-  });
-}
-
-/** Every `devtools` Session, newest first. */
-export function useDevtoolsSessions() {
-  return useQuery({
-    queryKey: [...queryKeys.sessions, 'devtools'],
-    queryFn: () =>
-      apiGet('/sessions?kind=devtools&limit=100', z.object({ data: z.array(sessionSchema) })).then((b) => b.data),
-  });
-}
-
-/** The Dev tools screen's first question: a Session with the picked scope, then the question as its first message. */
-export function useAskNewDevtoolsSession() {
-  const client = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: { connectionIds: string[]; settings: Partial<SessionDefaults>; text: string }) => {
-      const session = await apiSend(
-        'POST',
-        '/sessions',
-        { kind: 'devtools', connection_ids: input.connectionIds, ...input.settings },
-        z.object({ data: sessionSchema }),
-      ).then((body) => body.data);
-      // The new terminal shows its tab as soon as the Session exists, not after the question is sent too.
-      client.setQueryData<Session[]>([...queryKeys.sessions, 'devtools'], (list) =>
-        list?.some((kept) => kept.id === session.id) ? list : [session, ...(list ?? [])],
-      );
-      await apiSend(
-        'POST',
-        `/sessions/${session.id}/messages`,
-        { text: input.text },
-        z.object({ data: z.object({ message_id: z.string() }) }),
-      );
-      return session;
-    },
-    onSuccess: () => void client.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 

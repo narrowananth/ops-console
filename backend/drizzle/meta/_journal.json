@@ -379,6 +379,13 @@
       "when": 1795627229263,
       "tag": "0053_approval_subagent",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1795689115456,
+      "tag": "0054_connector_figma",
+      "breakpoints": true
     }
   ]
 }

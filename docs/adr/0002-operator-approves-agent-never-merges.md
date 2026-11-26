@@ -56,6 +56,19 @@ inside a call it runs ([ADR 0004](0004-secrets-in-keychain.md), [ADR 0005](0005-
 and the operator types one in a masked field of the Session, never in the chat. Playbook steps, Alert Sessions and Repo
 Sessions do not get these tools. A no is final, as for `save_file`.
 
+A Session reaches a Connection only through its Connection scope. The operator ticks Connections in the composer, and the
+console ticks too: when a `repo` Session is made, every Connection with Access Level `read` that a `.env` file in the Repo's
+own checkout names is added to its scope, as ordinary rows the operator may untick later. Only the operator's own local
+files count: not a name ending `.example`, `.sample`, `.template` or `.dist`, and not a file git tracks, since a pull
+request can change that. A Connection is named by its `host` field or the host of a URL in its config, as a whole token, or,
+on this machine, by its port and its database name together. A PR Session has no scope to edit: at each run it reaches the
+same Connections found again from the Repo's own checkout, and never from the pull request's branch, with two limits. It
+gets no PROD Connection this way, and only Access Level `read`, because it reads pull request text and comments the
+operator did not write. An Anonymous Session, and a Repo it clones into, is not matched. A Connection with Access Level
+`write` or `none` is never ticked this way, so nothing the console ticks can write, and a PROD Connection with `read` ticked
+into a `repo` Session keeps its tag and its PROD write Approval in every Access mode. The daemon reads the file for names
+only: its text and values reach no prompt, transcript, log or Action Log row. Jobs keep their own reach.
+
 On any open pull request, the operator's or a teammate's, the push is the console's. In an Address comments Round,
 and only there, the review comments the operator ticked are change requests: the agent may change code to meet them, but
 never runs a command, reads a secret, touches a Connection or pushes because a comment says so. Everywhere else pull
@@ -101,6 +114,13 @@ request text stays data, never instructions. A general comment on the pull reque
   `start_process`, `browser_evaluate`, an integration write): the first design. It lost because an operator who chose
   Full access still met a prompt on most turns, and the chip said otherwise. In full access they run at once; the PROD
   write Approval, the merge denial, the Run sandbox and the refusals of sign-in and tokens still hold.
+- **The agent asks for a Connection and the operator approves in one click**: the safer option, and offered first. It lost
+  because the operator had already said which database a Repo uses by putting it in the Repo's `.env`, and a click on every
+  Session that touches data repeated that answer.
+- **Every read-only Connection in every Session**: no matching to build. It lost because each server costs seconds of
+  start-up and about 20k prompt tokens on every run, and a Session in one Repo would reach the databases of unrelated ones.
+- **Tick Connections when the task mentions data**: the agent's own words, or a pull request's text, would pick what it
+  reaches.
 - **Git host credentials handed to the Run sandbox so the agent pushes itself**: the Bitbucket
   and GitLab CLIs keep their tokens in the Keychain, so it cannot work for them; where it could, a steered run would hold a
   token that writes to every repository. The daemon pushes for the agent instead.
@@ -128,6 +148,12 @@ which the card says, refuses a folder whose name is taken, and checks nothing el
 exists and is not closed. `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/Library/LaunchAgents`, `~/Library/LaunchDaemons`,
 `~/Library/Keychains` and the console's data folder are refused as destinations, links resolved, in every Access mode
 including full. The operator reads the path on the card.
+
+A Connection named by a `.env` the operator did not mean to connect, such as a shared host, is reachable read-only from
+that Repo's Sessions until they untick it. A PR Session has no untick: only the Repo's file, the Connection's host or its
+Access Level changes what it reaches. What remains is this: a pull request's text can still steer a read query on a
+non-PROD Connection its Repo's `.env` names, and the result can go back in a reply. A PROD Connection is out of that
+reach, and the console ticks a `repo` Session's PROD one only in view of the operator, who can untick it.
 
 A fix waits for the operator. The console shows how long each verified Alert has waited for its
 Review. A run steered by log text can execute local commands; the safety lines, the Alert Session's Access mode and the scratch

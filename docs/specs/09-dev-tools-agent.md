@@ -1,6 +1,6 @@
 # Dev tools agent
 
-**Status:** shipped
+**Status:** superseded in part by [devtools-into-sessions](devtools-into-sessions.md). The Dev tools page is removed and no `devtools` Session can be made; earlier ones stay in the Sessions page. The Connection rules below (scope, Access Levels, Action Log, PROD write Approval, Results and Comparison) now apply in every Session.
 **Design:** Dev tools in `design/ops-console.html`: the `ops-agent · dev tools` terminal panel with its Connection scope picker
 
 ## Problem

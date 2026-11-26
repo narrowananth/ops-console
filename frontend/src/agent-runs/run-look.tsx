@@ -190,7 +190,7 @@ export function placeOf(
         tip: 'Open the pull request this run works on',
       };
     case SessionKind.Devtools:
-      return { to: '/devtools', where: 'Dev tools', what: session.title, tip: 'Open this Session in Dev tools' };
+      return { to: sessionPath(session.id), where: 'Dev tools', what: session.title, tip: 'Open this Session' };
     case SessionKind.Anonymous:
       return { to: sessionPath(session.id), where: 'No Repo', what: session.title, tip: 'Open this Session' };
     default:

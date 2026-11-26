@@ -947,5 +947,3 @@ export type AccountUsageReport = z.infer<typeof accountUsageSchema>;
 
 /** The most characters one paste into a Skill or Playbook field may hold; a longer paste is refused with an error. */
 export const EDITOR_PASTE_LIMIT = 5000;
-/** The most characters a terminal prompt holds; a longer paste is cut to it. */
-export const TERMINAL_TEXT_LIMIT = 10000;

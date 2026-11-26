@@ -19,6 +19,7 @@ import { Markdown } from '../components/ui/markdown';
 import type { PathwayState } from '../components/ui/pathway';
 import { ComparisonView, ResultView } from '../devtools/result-tables';
 import { COPY_FAILED, copyLabel, useCopy } from '../lib/clipboard';
+import { useConnections } from '../lib/queries';
 import { when } from '../monitor/scan-scope';
 import { KindBadge } from '../skills/kind-badge';
 import { messageLink } from '../workspace/links';
@@ -73,10 +74,12 @@ const PartView = memo(function PartView({ part, sessionId }: { part: Part; sessi
 /** A Result table of the agent's `ops-result` block, with an Expand button that opens the block's JSON in the Viewer. */
 function ExpandableResult({ part }: { part: Extract<Part, { kind: 'result' }> }) {
   const [open, setOpen] = useState(false);
+  // The Connection's type and PROD tag come from the saved Connections; a name that is not one shows plain.
+  const connections = useConnections().data?.data ?? [];
   const { kind: _kind, ...json } = part;
   return (
     <>
-      <ResultView part={part} connections={[]} onExpand={() => setOpen(true)} />
+      <ResultView part={part} connections={connections} onExpand={() => setOpen(true)} />
       {open && (
         <AttachmentViewer
           viewed={{ name: 'block.json', text: JSON.stringify(json, null, 2) }}

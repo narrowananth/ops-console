@@ -60,17 +60,26 @@ const DISCONNECT: Partial<Record<ConnectorId, string>> = {
     "Stops the console reading Loki, removes the Grafana MCP Server and the console's sign-in from the Keychain. Grafana Cloud and its logs stay as they are, and the data source you picked stays for the next Connect.",
   [ConnectorId.NewRelicLogs]:
     'Stops the console reading New Relic and removes the New Relic MCP Server. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.',
+  [ConnectorId.Figma]:
+    'Stops Sessions reading Figma and removes the Figma MCP Server. Your Figma account and files stay as they are.',
 };
 
 /** What Disconnect says for New Relic logs read with a User API key. */
 const NEW_RELIC_KEY_DISCONNECT =
   'Stops the console reading New Relic and removes your User API key from the Keychain. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.';
 
+/** What a pane says under its sign-in step, for a Connector that limits what Sessions do with the service. */
+const NOTES: Partial<Record<ConnectorId, string>> = {
+  [ConnectorId.Figma]:
+    "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none.",
+};
+
 const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.OtelLogs]: 'Stop the console reading the Log folder. Asks first.',
   [ConnectorId.CloudWatchLogs]: 'Stop the console reading the log groups. Asks first.',
   [ConnectorId.LokiLogs]: 'Stop the console reading Loki and remove its sign-in. Asks first.',
   [ConnectorId.NewRelicLogs]: 'Stop the console reading New Relic and remove its MCP Server. Asks first.',
+  [ConnectorId.Figma]: 'Stop Sessions reading Figma and remove its MCP Server. Asks first.',
 };
 
 /** One Connector: Connect, Reconnect or Disconnect. Nothing else is set here. */
@@ -145,6 +154,7 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
             onCancel={() => cancel.mutate(connector.id)}
           />
         )}
+        {NOTES[connector.id] && <div className="text-xs text-neutral-700">{NOTES[connector.id]}</div>}
         {error && (
           <div role="alert" className="text-xs text-accent-700">
             {error.message}

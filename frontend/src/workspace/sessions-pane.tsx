@@ -47,6 +47,8 @@ const isBusy = (session: Session) =>
 
 const NEEDS_YOU: SessionState[] = [SessionState.WaitingInput, SessionState.WaitingApproval, SessionState.Failed];
 const needsYou = (session: Session) => NEEDS_YOU.includes(session.state);
+/** Anonymous Sessions and the earlier Dev tools ones work in no Repo. */
+const noRepo = (session: Session) => session.kind === SessionKind.Anonymous || session.kind === SessionKind.Devtools;
 const working = (session: Session) => session.state === SessionState.Working;
 
 /** Stop on a busy row, in the corner of its state and time on hover or focus (they hide); a button may not sit inside the row's button. */
@@ -430,7 +432,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   const searching = q.trim() !== '';
   const matches = matcher(q);
   const withRepo = new Set(sessions.data.map((session) => session.repo_id).filter((id) => id !== null));
-  const hasAnonymous = sessions.data.some((session) => session.kind === SessionKind.Anonymous);
+  const hasAnonymous = sessions.data.some(noRepo);
   const repoOptions = [
     { value: ANY, label: 'All Repos', description: `${sessions.data.length} Sessions` },
     ...(hasAnonymous ? [{ value: NO_REPO, label: 'No Repo', description: 'anonymous' }] : []),
@@ -446,7 +448,7 @@ export function SessionsPane({ selected, onSelect }: { selected: string | null; 
   const repoPicked = repoOptions.some((option) => option.value === repoFilter) ? repoFilter : ANY;
 
   const inRepo = sessions.data.filter((session) => {
-    if (repoPicked === NO_REPO) return session.kind === SessionKind.Anonymous;
+    if (repoPicked === NO_REPO) return noRepo(session);
     return repoPicked === ANY || session.repo_id === repoPicked;
   });
   const found = inRepo.filter((session) => {

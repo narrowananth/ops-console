@@ -7,7 +7,6 @@ const PAGE_PATHS = [
   '/monitor',
   '/sessions',
   '/pull-requests',
-  '/devtools',
   '/integrations',
   '/connections',
   '/repos',

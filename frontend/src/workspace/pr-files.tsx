@@ -309,10 +309,11 @@ export function PrFiles({ pr, viewed }: { pr: PullRequestDetail; viewed: ReturnT
   const [fold, setFold] = useState<{ pr: string; open: boolean } | null>(null);
   const bulk = fold?.pr === here ? fold : null;
   const [reveal, setReveal] = useState<{ file: string; thread: string } | null>(null);
+  // The last file picked in the tree, for this pull request only; each pick is a new object.
+  const [pick, setPick] = useState<{ pr: string; file: string } | null>(null);
+  const picked = pick?.pr === here ? pick : null;
   const threads = threadsOf(pr);
   const files = sortedFiles(pr, sort);
-  const scrollTo = (name: string) =>
-    document.querySelector(`section[aria-label="${CSS.escape(name)}"]`)?.scrollIntoView({ block: 'start' });
   return (
     <div role="tabpanel" className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="flex flex-none flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-line px-6 py-2 text-xs text-neutral-700">
@@ -406,7 +407,7 @@ export function PrFiles({ pr, viewed }: { pr: PullRequestDetail; viewed: ReturnT
               onFold={() => setTreeFolded(true)}
               onPick={(file) => {
                 setActive(file.name);
-                scrollTo(file.name);
+                setPick({ pr: here, file: file.name });
               }}
             />
           ))}
@@ -424,6 +425,7 @@ export function PrFiles({ pr, viewed }: { pr: PullRequestDetail; viewed: ReturnT
               onViewed={(next) => viewed.set(file, next)}
               bulk={bulk}
               reveal={reveal}
+              picked={picked}
             />
           ))}
         </section>

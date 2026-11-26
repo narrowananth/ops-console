@@ -423,7 +423,7 @@ with. Each finding is posted to the Git host on its line, and the verdict and re
 it stale. The operator may add a **Review note** when starting it: free text the agent reads with the pull request, such
 as where to look or a related pull request to read first. The note narrows the review; the Playbook's checks stay.
 
-### Dev tools
+### Connections
 
 **Connection**:
 A database or stream the agent may use, with an Environment and an Access Level.
@@ -439,24 +439,29 @@ reads it: a PROD Connection is never given write access.
 
 **MCP Server**:
 A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The
-console registers it in every Claude account. It exposes tools; it does not sign anyone in. Integrations lists them beside the Connectors; a Connector or Dev tools adds them.
+console registers it in every Claude account. It exposes tools; it does not sign anyone in. Integrations lists them beside the Connectors; a Connector or a Connection adds them.
 
 **Probe**:
 A short Agent SDK session that reads which MCP Servers connect and which tools they give, then
 stops before the model runs.
 
 **Connector**:
-An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic, or, for New Relic logs when the operator gives a User API key, through New Relic's own API. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+An outside service the operator signs in to, or a Log folder, an AWS profile, a Loki data source or a New Relic account it reads logs with: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets, Google Drive, OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs, Figma. It holds the sign-in, folder, profile, data source or account and registers the service's MCP Server when it has one. Each service is reached through a CLI or an MCP Server, and the daemon reads a Log folder. Loki logs and New Relic logs are read by the daemon through the hosted MCP Servers of Grafana Cloud and New Relic, or, for New Relic logs when the operator gives a User API key, through New Relic's own API. All are connected, checked and disconnected in Integrations, the one place a source is connected.
+
+**Read list**:
+The tools of a Connector's MCP Server that a run may call. The console refuses every other tool of that server, so a server with no read-only mode of its own is still read only. Figma's is the only one so far.
 
 **Google bridge**:
 The stdio MCP Server the console registers for a Google Connector. It keeps nothing on disk: the launcher hands it the Connector's refresh token from the Keychain, and it mints access tokens and answers each tool call from the product's REST API. One Google sign-in serves every Claude account and CLIProxy.
 
 **Connection scope**:
 The Connections a Session's runs may reach. Empty reaches none in a `repo` or `anonymous` Session and every Connection with
-access in a Dev tools one. The operator ticks them in the composer; the agent cannot change it.
+access in an earlier Dev tools one. The operator ticks them in the composer, and the console ticks the read ones the Repo's own
+`.env` names when a `repo` Session is made. A PR Session has no scope: each run reaches the non-PROD read Connections its Repo's untracked `.env`
+names. The agent cannot change it.
 
 **Result**:
-The rows one Connection gave for one Dev tools question, shown as a table under the Connection's name.
+The rows one Connection gave for one question about data, shown as a table under the Connection's name in the Session.
 
 **Comparison**:
 The agent's match of Results from two or more Connections on one key: one row per field, with the
