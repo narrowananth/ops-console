@@ -1,4 +1,4 @@
-import type { Session, SessionKind, SessionPatch } from '@ops-console/shared';
+import type { RunPurpose, Session, SessionKind, SessionPatch } from '@ops-console/shared';
 import type { SessionRow } from './sessions.service';
 
 export type SessionKindHandler = {
@@ -24,14 +24,16 @@ export type SessionKindHandler = {
   view?: (session: SessionRow) => Partial<Session>;
   /** Applies the kind's own `PATCH` fields before the common ones are written; throws to refuse. */
   patch?: (session: SessionRow, patch: SessionPatch) => void;
-  /** MCP servers left out of this Session's next run. */
-  deniedServers?: (session: SessionRow) => string[];
+  /** MCP servers left out of this Session's next run, for a run of `purpose`. */
+  deniedServers?: (session: SessionRow, purpose: RunPurpose) => string[];
   /** What a step shows for an MCP server: its Connection and Access Level. */
   serverLabel?: (server: string) => string | null;
   /** Runs after each run ends, such as reading which branch the agent worked on. Its errors are ignored. */
   afterRun?: (session: SessionRow, run: { startedAt: string; workingDir: string }) => Promise<void>;
   /** Appended to Claude Code's system prompt on this kind's runs. */
   instructions?: string;
+  /** Appended on the operator's chat runs: the Connections the Session may reach. */
+  connectionsNote?: (session: SessionRow) => string | null;
 };
 
 /** Each kind's spec registers its handler; a kind with none cannot run. */

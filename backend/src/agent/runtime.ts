@@ -1225,7 +1225,9 @@ export class AgentRuntime implements OnModuleDestroy {
     }
     // The setup tools: an Anonymous Session's operator chat, never a job.
     const anonymous = isOperatorChat(run) && this.anonymousTools?.offers(run.sessionId) ? this.anonymousTools : null;
-    const instructions = [kind?.instructions, anonymous ? ANONYMOUS_SETUP_INSTRUCTIONS : undefined]
+    const connectionsNote =
+      run.purpose === RunPurpose.Chat ? (kind?.connectionsNote?.(session) ?? undefined) : undefined;
+    const instructions = [kind?.instructions, connectionsNote, anonymous ? ANONYMOUS_SETUP_INSTRUCTIONS : undefined]
       .filter((part) => part !== undefined)
       .join('\n\n');
 
@@ -1239,7 +1241,7 @@ export class AgentRuntime implements OnModuleDestroy {
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
     const logSource = this.logSourceOf(session.alertId);
-    const scope = mcpScope(run.purpose, session.kind, logSource);
+    const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined && session.prAction === null, logSource);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {
@@ -1381,7 +1383,7 @@ export class AgentRuntime implements OnModuleDestroy {
             .from(disabledMcpServers)
             .all()
             .map(({ name }) => name),
-          ...(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []),
+          ...(kind?.deniedServers?.(session, run.purpose) ?? []),
           ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
           ...(scope.withoutConnections ? this.connectionServers() : []),
           ...scope.withoutConnectors,
@@ -1531,7 +1533,7 @@ export class AgentRuntime implements OnModuleDestroy {
    * others. Servers left out of this run are not reported.
    */
   private reportServers(run: Run, session: SessionRow, servers: { name: string; status: string }[]): void {
-    const denied = new Set(this.kinds.get(session.kind)?.deniedServers?.(session) ?? []);
+    const denied = new Set(this.kinds.get(session.kind)?.deniedServers?.(session, run.purpose) ?? []);
     const from = run.parts.length;
     for (const { name, status } of servers) {
       if ((status !== 'failed' && status !== 'needs-auth') || denied.has(name) || !this.connections.find(name))

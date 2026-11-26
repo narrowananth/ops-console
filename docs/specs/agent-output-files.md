@@ -19,9 +19,10 @@ steered run could write there too, and the operator would see no card. The agent
    ([open-run-sandbox](open-run-sandbox.md)).
 3. A file the agent writes in the output folder shows in the Session's transcript as a chip with its name and size, on
    the message of the turn that wrote it. A file rewritten in a later turn shows on that later turn's message only.
-4. A chip opens the file over the page, as an attached file does: an image or PDF as itself, text as text, any other type
-   (spreadsheet, zip, document, HTML, SVG) as a Download. Nothing the agent wrote ever renders as a page or script in the
-   console.
+4. A chip opens the file in the Viewer, as an attached file does: an image or PDF as itself, text as text, HTML and SVG in
+   a frame that runs no script and reaches no network, a type the Viewer draws (Markdown, JSON, CSV, Mermaid, Graphviz) as
+   drawn ([output-viewer](output-viewer.md)), any other type (spreadsheet, zip, document) as a Download. Nothing the agent
+   wrote ever renders as a page or script in the console.
 5. Download keeps the file's own name.
 6. The chip shows after a reload and in another tab, because the daemon keeps the list, not the page.
 7. A file the agent names in text but did not write in the output folder gets no chip. The agent's text stays as it is.
@@ -74,8 +75,8 @@ steered run could write there too, and the operator would see no card. The agent
 - **No merge**: a folder save into a name that exists is refused. The agent renames the folder in the output folder or
   the operator picks another destination.
 - **Copy, not move**: the file stays in the output folder. A move would break the chip and the history.
-- **Type**: the viewer's existing rule decides how a file shows: image and PDF as themselves, text as text, everything
-  else as bytes to download.
+- **Type**: the Viewer's rule decides how a file shows ([output-viewer](output-viewer.md)); the daemon never serves HTML
+  or SVG as a page.
 - **Name**: the agent's file name is kept in the folder, unlike an attachment, because the agent picks it. The daemon
   serves only a bare file name that is in the folder, never a path.
 

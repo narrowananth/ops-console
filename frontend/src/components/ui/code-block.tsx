@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
 import { COPY_FAILED, type CopyState, useCopy } from '../../lib/clipboard';
 
+const iconButton =
+  'flex size-7 cursor-pointer items-center justify-center rounded-md border opacity-0 transition-opacity group-focus-within/code:opacity-100 group-hover/code:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100';
+const TONES = {
+  dark: 'border-white/20 bg-neutral-800/90 text-neutral-100 hover:bg-neutral-700',
+  light: 'border-line bg-card text-neutral-800 hover:bg-neutral-200',
+};
+
 /**
  * Preformatted text with a copy icon in its top right corner. The icon shows on hover and keyboard focus, and always
  * where there is no hover. It copies the whole text exactly as given. No text, no icon.
@@ -11,6 +18,7 @@ export function CodeBlock({
   wrapperClassName = '',
   tone = 'dark',
   note,
+  onExpand,
 }: {
   text: string;
   /** Classes of the `<pre>`. */
@@ -21,28 +29,41 @@ export function CodeBlock({
   tone?: 'dark' | 'light';
   /** Shown after the text and never copied. */
   note?: string;
+  /** Adds an Expand button beside Copy; the caller opens the Viewer. */
+  onExpand?: () => void;
 }) {
   const [state, copy] = useCopy();
   return (
     <div className={`group/code relative min-w-0 ${wrapperClassName}`}>
-      <pre className={`${className} ${text === '' ? '' : 'pr-10'}`}>
+      <pre className={`${className} ${text === '' ? '' : onExpand ? 'pr-[4.5rem]' : 'pr-10'}`}>
         {text}
         {note}
       </pre>
       {text !== '' && (
-        <button
-          type="button"
-          aria-label="Copy"
-          title={state === 'failed' ? COPY_FAILED : state === 'copied' ? 'Copied' : 'Copy'}
-          onClick={() => copy(text)}
-          className={`absolute top-1.5 right-1.5 flex size-7 cursor-pointer items-center justify-center rounded-md border opacity-0 transition-opacity group-focus-within/code:opacity-100 group-hover/code:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100 ${
-            tone === 'dark'
-              ? 'border-white/20 bg-neutral-800/90 text-neutral-100 hover:bg-neutral-700'
-              : 'border-line bg-card text-neutral-800 hover:bg-neutral-200'
-          }`}
-        >
-          <CopyIcon state={state} />
-        </button>
+        <div className="absolute top-1.5 right-1.5 flex gap-1">
+          {onExpand && (
+            <button
+              type="button"
+              aria-label="Expand"
+              title="Open in the Viewer"
+              onClick={onExpand}
+              className={`${iconButton} ${TONES[tone]}`}
+            >
+              <Svg>
+                <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9" />
+              </Svg>
+            </button>
+          )}
+          <button
+            type="button"
+            aria-label="Copy"
+            title={state === 'failed' ? COPY_FAILED : state === 'copied' ? 'Copied' : 'Copy'}
+            onClick={() => copy(text)}
+            className={`${iconButton} ${TONES[tone]}`}
+          >
+            <CopyIcon state={state} />
+          </button>
+        </div>
       )}
     </div>
   );

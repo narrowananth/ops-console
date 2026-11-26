@@ -268,6 +268,8 @@ export const createRepoSessionSchema = z.strictObject({
   from_origin: z.boolean().optional(),
   /** A branch no one has: it is made at the newest commit of the Repo's default branch. */
   new_branch: z.boolean().optional(),
+  /** The Connections the agent may reach; empty reaches none. */
+  connection_ids: z.array(z.string().min(1)).default([]),
   model: z.enum(Model).optional(),
   effort: z.enum(Effort).optional(),
   access_mode: z.enum(AccessMode).optional(),
@@ -279,12 +281,14 @@ export type CreateRepoSession = z.infer<typeof createRepoSessionSchema>;
 export const createAnonymousSessionSchema = z.strictObject({
   kind: z.literal(SessionKind.Anonymous),
   title: z.string().trim().min(1).max(200).optional(),
+  /** The Connections the agent may reach; empty reaches none. */
+  connection_ids: z.array(z.string().min(1)).default([]),
   model: z.enum(Model).optional(),
   effort: z.enum(Effort).optional(),
   access_mode: z.enum(AccessMode).optional(),
 });
 
-export type CreateAnonymousSession = z.infer<typeof createAnonymousSessionSchema>;
+export type CreateAnonymousSession = z.input<typeof createAnonymousSessionSchema>;
 
 /** What the Session's header needs to offer opening a pull request. */
 export const sessionPullRequestSchema = z.object({

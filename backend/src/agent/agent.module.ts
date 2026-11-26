@@ -16,6 +16,7 @@ import { AccountUsage } from './account-usage';
 import { AGENT_CONFIG, type AgentConfig } from './agent-config';
 import { Attachments } from './attachments';
 import { ConnectionLookup } from './connection-lookup';
+import { ConnectionScopes } from './connection-scopes';
 import { MessageInterceptors } from './message-interceptors';
 import { OutputFiles } from './output-files';
 import { ProdWriteRule } from './prod-write-rule';
@@ -62,6 +63,7 @@ export class AgentModule {
         SessionKinds,
         MessageInterceptors,
         ConnectionLookup,
+        ConnectionScopes,
         ProdWriteRule,
         Transcripts,
         SessionForks,
@@ -88,7 +90,7 @@ export class AgentModule {
         SessionKinds,
         MessageInterceptors,
         ConnectionLookup,
-        ConnectionLookup,
+        ConnectionScopes,
         ProdWriteRule,
         OutputFiles,
         SessionsService,

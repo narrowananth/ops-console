@@ -150,6 +150,13 @@ export const FolderIcon = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+export const DatabaseIcon = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+    <path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
+  </Icon>
+);
+
 export const PlusIcon = () => (
   <Icon>
     <path d="M12 5v14M5 12h14" />

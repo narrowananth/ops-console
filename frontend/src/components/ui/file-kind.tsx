@@ -8,7 +8,7 @@ const BY_EXTENSION: [FileKind, RegExp][] = [
   ['archive', /\.(7z|bz2|gz|rar|tar|tgz|xz|zip)$/i],
   [
     'text',
-    /\.(c|conf|cpp|css|csv|diff|go|h|html?|ini|java|jsonl?|jsx?|kt|log|md|mjs|patch|py|rb|rs|scss|sh|sql|swift|toml|tsv|tsx?|txt|xml|ya?ml)$/i,
+    /\.(c|conf|cpp|css|csv|diff|go|h|html?|ini|java|jsonl?|jsx?|kt|log|md|markdown|mermaid|mjs|mmd|dot|gv|patch|py|rb|rs|scss|sh|sql|swift|toml|tsv|tsx?|txt|xml|ya?ml)$/i,
   ],
 ];
 

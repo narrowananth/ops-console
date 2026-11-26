@@ -1,4 +1,4 @@
-import { CONNECTOR_SERVERS, ConnectorId, type LogSource, RunPurpose, SessionKind } from '@ops-console/shared';
+import { CONNECTOR_SERVERS, ConnectorId, type LogSource, RunPurpose } from '@ops-console/shared';
 import { CLOUDWATCH_SERVER } from './cloudwatch-tools';
 
 /**
@@ -26,11 +26,16 @@ const PR_JOB_KEEPS = ['github', 'atlassian'];
 const serverOf = (id: ConnectorId): string => (CONNECTOR_SERVERS[id] as { name: string }).name;
 
 /**
- * `logSource` is the log source of the Alert the run works on, when it has one: only a Datadog Alert starts the Datadog
+ * `scopesConnections`: the Session's kind scopes its own Connections (`SessionKindHandler.deniedServers`), so a chat
+ * starts those it names. `logSource` is the log source of the Alert the run works on, when it has one: only a Datadog Alert starts the Datadog
  * server, only a Loki or New Relic Alert starts that source's hosted server, and only a CloudWatch Alert, or a run with
  * no Alert, starts the CloudWatch one.
  */
-export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogSource | null = null): McpScope {
+export function mcpScope(
+  purpose: RunPurpose,
+  scopesConnections: boolean,
+  logSource: LogSource | null = null,
+): McpScope {
   const datadog = logSource === null || logSource === ConnectorId.Datadog ? ['datadog-pup'] : [];
   const cloudWatch = logSource === null || logSource === ConnectorId.CloudWatchLogs ? [CLOUDWATCH_SERVER] : [];
   const hosted = [ConnectorId.LokiLogs, ConnectorId.NewRelicLogs]
@@ -57,8 +62,8 @@ export function mcpScope(purpose: RunPurpose, kind: SessionKind, logSource: LogS
         withoutConnectors: connectorServers(...datadog, ...cloudWatch, ...hosted),
       };
     case RunPurpose.Chat:
-      // A Dev tools Session is scoped to its own Connections elsewhere; any other chat starts none of them.
-      return { none: false, withoutConnections: kind !== SessionKind.Devtools, withoutConnectors: [] };
+      // A kind that scopes its Connections leaves out the ones outside the scope; any other chat starts none of them.
+      return { none: false, withoutConnections: !scopesConnections, withoutConnectors: [] };
   }
 }
 

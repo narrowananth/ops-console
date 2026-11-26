@@ -1,9 +1,10 @@
 import type { Repo, Session } from '@ops-console/shared';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { FolderIcon } from '../components/ui/icons';
 import { item, menu } from '../components/ui/item';
 import { useUpdateSession } from '../lib/queries';
 import { ascending } from '../lib/sort';
+import { useAnchoredMenu } from './anchored-menu';
 
 /**
  * The composer's Repos icon, beside Attach: other Repos the operator opens to this Session, so its agent reads, edits and commits in
@@ -11,10 +12,8 @@ import { ascending } from '../lib/sort';
  */
 export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[] }) {
   const update = useUpdateSession(session.id);
-  const [place, setPlace] = useState<CSSProperties | null>(null);
   const [query, setQuery] = useState('');
-  const trigger = useRef<HTMLButtonElement>(null);
-  const open = place !== null;
+  const { trigger, open, place, close, toggle } = useAnchoredMenu('data-extra-repos');
   const picked = session.extra_repo_ids;
   const others = ascending(
     repos.filter((repo) => repo.id !== session.repo_id),
@@ -25,53 +24,15 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
   const needle = query.trim().toLowerCase();
   const shown = needle ? others.filter((repo) => repo.name.toLowerCase().includes(needle)) : others;
 
-  useEffect(() => {
-    if (!open) return;
-    const close = () => setPlace(null);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      close();
-      trigger.current?.focus();
-    };
-    // A scroll anywhere but inside the list would leave it floating away from its button.
-    const scroll = (event: Event) => {
-      if (!(event.target instanceof Element && event.target.closest('[data-extra-repos]'))) close();
-    };
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('scroll', scroll, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', scroll, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [open]);
-
   if (others.length === 0) return null;
 
-  const toggle = () => {
-    const box = trigger.current?.getBoundingClientRect();
-    if (open || !box) return setPlace(null);
-    setQuery('');
-    // The list is 18rem wide; the button sits at the toolbar's left edge, so the list only needs a nudge in a narrow window.
-    setPlace({
-      bottom: window.innerHeight - box.top + 6,
-      left: Math.max(8, Math.min(box.left, window.innerWidth - 296)),
-    });
-  };
   const flip = (id: string) =>
     update.mutate({ extra_repo_ids: picked.includes(id) ? picked.filter((one) => one !== id) : [...picked, id] });
 
   return (
     <div className="relative flex-none">
       {open && (
-        <button
-          type="button"
-          aria-hidden
-          tabIndex={-1}
-          className="fixed inset-0 z-50 cursor-default"
-          onClick={() => setPlace(null)}
-        />
+        <button type="button" aria-hidden tabIndex={-1} className="fixed inset-0 z-50 cursor-default" onClick={close} />
       )}
       <button
         ref={trigger}
@@ -80,7 +41,7 @@ export function ExtraRepos({ session, repos }: { session: Session; repos: Repo[]
         aria-expanded={open}
         aria-label={`Repos: ${choice}`}
         title={`Repos: ${choice}. Other Repos this Session's agent may read, edit and commit in, as in its own. Applies from its next run.`}
-        onClick={toggle}
+        onClick={() => toggle(() => setQuery(''))}
         className={`relative flex size-9 cursor-pointer items-center justify-center rounded-full border text-neutral-700 hover:border-accent-300 hover:text-text ${
           open
             ? 'border-divider bg-neutral-200'

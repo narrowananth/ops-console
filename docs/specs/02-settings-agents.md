@@ -238,7 +238,7 @@ Envelopes, auth and shared error codes come from `01-base-daemon-setup`. This sp
 | --------------- | ---- | ------- |
 | `GET /sessions` | query `kind?`, `q?` (title search), `limit?`, `cursor?` | `Session[]` with `meta.next_cursor`, newest `last_active_at` first; Sessions of a Repo removed with its Sessions kept are left out (`07-workspace` Behavior 3) |
 | `GET /sessions/:id` | | `Session` |
-| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools` Session (`09-dev-tools-agent`) and `extra_repo_ids?` (`open-other-repos-to-session`) | `Session` |
+| `PATCH /sessions/:id` | `{ title?, model?, effort?, access_mode? }`, plus `connection_ids?` on a `devtools`, `repo` or `anonymous` Session (`09-dev-tools-agent`, `session-connections`) and `extra_repo_ids?` (`open-other-repos-to-session`) | `Session` |
 | `DELETE /sessions/:id` | | 204; `session_busy` |
 | `POST /sessions/:id/messages/:message_id/edit` | `{ text }` | 202 `{ message_id, reverted: { files, insertions, deletions } \| null, revert_error }`; `invalid_state` for any message but the last; `session_busy` (Behavior 8a) |
 | `POST /sessions/:id/warm` | | 204; starts a spare Claude Code process for the next message (Behavior 2); `session_busy` while a run goes |

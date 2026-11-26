@@ -20,6 +20,7 @@ import {
 } from '@ops-console/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import { ActionLogService } from '../action-log/action-log.service';
+import { ConnectionScopes, scopedConnections } from '../agent/connection-scopes';
 import { SessionKinds } from '../agent/session-kinds';
 import { type SessionRow, SessionsService, toSession } from '../agent/sessions.service';
 import { DATA_DIR } from '../common/data-dir';
@@ -47,12 +48,14 @@ export class WorkspaceSessionsService {
     @Inject(ActionLogService) private readonly actionLog: ActionLogService,
     @Inject(DATA_DIR) private readonly dataDir: string,
     @Inject(FOLDER_OPENER) private readonly opener: FolderOpener,
+    @Inject(ConnectionScopes) private readonly scopes: ConnectionScopes,
     @Inject(SessionKinds) kinds: SessionKinds,
   ) {
     kinds.register(SessionKind.Repo, {
       workingDir: (session) => this.worktreeDir(session.id),
       ownWorktree: true,
       acceptsMessages: true,
+      ...scopedConnections(scopes, 'none'),
       create: (body) => this.create(parseInput(createRepoSessionSchema, body, 'body')),
       prepare: async (session) => {
         await this.ensure(session);
@@ -97,6 +100,8 @@ export class WorkspaceSessionsService {
   }
 
   async create(input: CreateRepoSession): Promise<Session> {
+    const ids = [...new Set(input.connection_ids)];
+    this.scopes.check(ids);
     const folder = this.folder(input.repo_id);
     const branches = await this.git.branches(folder);
     if (!branches.some((branch) => branch.name === input.branch)) {
@@ -131,6 +136,7 @@ export class WorkspaceSessionsService {
       effort: input.effort,
       access_mode: input.access_mode,
     });
+    this.scopes.set(row.id, ids);
     // The worktree starts from the default branch as last fetched, so the Session opens at once; the newest commits
     // follow in the background and, at the latest, before the first run's first tool (`refreshDefault`).
     try {
@@ -140,7 +146,7 @@ export class WorkspaceSessionsService {
       throw error;
     }
     void asBackground(() => this.followOrigin(row));
-    return toSession(row, []);
+    return this.sessions.view(row);
   }
 
   /**

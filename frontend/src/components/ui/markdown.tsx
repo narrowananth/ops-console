@@ -1,10 +1,10 @@
 import { memo, type ReactNode, useMemo } from 'react';
 import { InlineText } from '../../agents/inline-text';
-import { CodeBlock } from './code-block';
+import { FencedBlock } from './fenced-block';
 
 type Block =
   | { kind: 'heading'; level: number; text: string }
-  | { kind: 'code'; text: string }
+  | { kind: 'code'; lang: string; text: string }
   | { kind: 'list'; ordered: boolean; items: string[] }
   | { kind: 'table'; head: string[]; rows: string[][] }
   | { kind: 'quote'; text: string }
@@ -50,11 +50,12 @@ function blocks(source: string): Block[] {
     }
     if (line.trimStart().startsWith('```')) {
       const code: string[] = [];
+      const lang = /^\s*```\s*([\w+-]*)/.exec(line)?.[1] ?? '';
       index++;
       while (index < lines.length && !(lines[index] ?? '').trimStart().startsWith('```'))
         code.push(lines[index++] ?? '');
       index++;
-      out.push({ kind: 'code', text: code.join('\n') });
+      out.push({ kind: 'code', lang, text: code.join('\n') });
       continue;
     }
     if (RULE.test(line)) {
@@ -139,8 +140,9 @@ export const Markdown = memo(function Markdown({ source, className = '' }: { sou
         }
         if (block.kind === 'code') {
           return (
-            <CodeBlock
+            <FencedBlock
               key={key}
+              lang={block.lang}
               text={block.text}
               className="m-0 overflow-auto rounded-lg bg-neutral-900 p-3 font-mono text-xs text-neutral-100"
             />
