@@ -33,14 +33,21 @@ sign-in and no status.
    `_`, not a list. A name with a word of the **delete** group (`delete`, `remove`, `archive`, `destroy`) is destructive. Else a name with a
    word of the **write** group (`create`, `update`, `add`, `set`, `assign`, `unassign`, `upload`, `move`, `merge`, `link`,
    `unlink`, `start`, `stop`, `run`, `cancel`, `apply`, `approve`, `publish`) is a write. Else a name with a word of the
-   **read** group (`get`, `search`, `list`, `find`, `read`, `whoami`, `current`) is a read. Any other name is destructive.
-   The first matching group wins in that order, so `stories-remove-subtask` and `stories-get-and-delete` are destructive.
+   **read** group (`get`, `search`, `list`, `find`, `read`, `whoami`, `current`) is a read, but only when every other word
+   in it is a read word or a **noun** Shortcut names things by (`story`, `epic`, `iteration`, `label`, `team`, `id` and the
+   like). Any other name is destructive. The write group also holds `mark`, `replace`, `reorder`, `complete`, `close`,
+   `reopen`, `transition`, `rename`, `convert`, `import`, `send`, `post`, `reply`, `resolve`, `restore`, `duplicate`, `copy`,
+   `clone`, `sort`, `reset`, `sync`, `attach`, `detach`, `invite`, `change`, `edit`, `toggle`, `enable`, `disable`,
+   `submit`, `vote`, `follow`, `unfollow` and `subscribe`. The first matching group wins in that order, so
+   `stories-remove-subtask` and `stories-get-and-delete` are destructive, and `stories-get-and-complete` and
+   `notifications-mark-read` ask: a name with a read word and a word nothing places does not run unasked.
 7. Reads run. Writes raise an Approval in every Access mode but `full`, where they run at once. Destructive tools, and any
    name no group matches, raise an Approval in every Access mode, `full` included. This is the behavior of
    [notion-connector](notion-connector.md) 6 to 10, with the class found by the rule in 6.
 8. A name the console cannot place asks every time. The operator sees it on the Approval card, which names the tool.
 9. An Approval for a Shortcut tool names the service, the tool and its main inputs (the story, epic or iteration it acts on,
-   the title or text, capped in length), with Approve and Deny as for any command. Each call that is not a read writes an Action Log row before it runs.
+   the title or text, its command and whether it archives, capped in length), with Approve and Deny as for any command. Each
+   call that is not a read writes an Action Log row before it runs.
 10. Shortcut may refuse a call: an item the account cannot reach, a rate limit (200 requests a minute on the REST API).
     The agent receives Shortcut's message and the Connector's status does not change.
 11. Figma and Notion keep their own rules. What must not regress: the other eighteen Connectors, the MCP servers page,
@@ -58,7 +65,9 @@ sign-in and no status.
 - **Remove counts as delete.** Removing a subtask or a link is reversible, but the rule does not tell it from removing a
   story, so it asks every time.
 - **Update asks, not always.** An update can archive a story, which a word rule cannot see. The Approval shows the call's
-  inputs so the operator can.
+  inputs, `archived` included, so the operator can.
+- **Jobs and pull request Sessions**: a call to Shortcut's tools under any name its server can carry is refused in them
+  before it runs, since the exact-name denial cannot name a claude.ai connector or a plugin.
 - **Server names**: the rule applies to the console's `shortcut` server and to Shortcut's server under the names a plugin
   or a claude.ai connector gives it, in any case.
 

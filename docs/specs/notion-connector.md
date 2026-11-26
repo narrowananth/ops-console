@@ -22,7 +22,8 @@ status, and the console has no way to let a server's reads run while its writes 
 3. A sign-in the operator does not finish within 5 minutes is stopped and reads `auth`. Cancel stops one that waits.
    Disconnect removes the server and clears the stored state, and signs the operator out of nothing at Notion. A Notion
    server turned off in Integrations reads `fail`, "notion is turned off in MCP servers", and Connect turns it back on.
-4. A Session's own runs (the operator's messages) can call Notion's tools. A job the console starts, and a pull request's
+4. A Session's own runs (the operator's messages) can call Notion's tools. A call to them under any name Notion's server
+   can carry (a claude.ai connector, a plugin) is refused in a job and in a pull request's Session before it runs. A job the console starts, and a pull request's
    Session, do not reach Notion.
 5. The agent is told, when Notion is connected and the run can use it, which Notion tools read, which change things and
    ask the operator, and which delete and always ask.
@@ -46,7 +47,8 @@ status, and the console has no way to let a server's reads run while its writes 
      `notion-create-suggested-edit`, `notion-resolve-suggested-edit`, `notion-restore-version`, `notion-restore-pages`.
    - Destructive: `notion-delete-pages`, `notion-delete-databases`, `notion-delete-comment`, and any tool not listed.
 8. An Approval for a Notion tool names the service, the tool and its main inputs (the page or database it acts on, the
-   title or text, capped in length), with Approve and Deny as for any command. Approve runs the call. Deny tells the agent
+   title or text, the command of an update such as `replace_content`, capped in length), with Approve and Deny as for any
+   command. Approve runs the call. Deny tells the agent
    the operator denied it and not to retry another way.
 9. Each Notion call that is not a read writes an Action Log row before it runs, with the tool and its target, and no
    page content beyond the capped summary.

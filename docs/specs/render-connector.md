@@ -17,7 +17,7 @@ has a hosted MCP server, but it signs in with an API key, and the console must n
 
 1. Integrations lists Render as a twentieth Connector, after Shortcut, with status `off`.
 2. Render's pane has one step: an API key field and Connect. The operator creates the key in the Render dashboard and pastes
-   it. Connect takes `{ api_key }`, refuses an empty one, and stores it in the Keychain under the server's name. The key
+   it. Connect takes `{ api_key }`, refuses one under 8 characters, and stores it in the Keychain under the server's name. The key
    never appears in a response, event, log, config file or the agent's prompt.
 3. Connect registers the `render` MCP Server in every account, started through the launcher as a stdio command that reaches
    `https://mcp.render.com/mcp` with the header `Authorization: Bearer <key>`. The key reaches only that server's process,
@@ -26,7 +26,8 @@ has a hosted MCP server, but it signs in with an API key, and the console must n
    turned off in Integrations reads `fail`, "render is turned off in MCP servers", and Connect turns it back on.
 5. Disconnect removes the server and the stored key, and revokes nothing at Render. The pane says to delete the key in
    the dashboard.
-6. A Session's own runs can call Render's tools. A job the console starts, and a pull request's Session, do not reach Render.
+6. A Session's own runs can call Render's tools. A job the console starts, and a pull request's Session, do not reach Render:
+   a call to its tools under any name Render's server can carry is refused in them before it runs.
 7. The agent is told, when Render is connected and the run can use it, which tools read, which change things and ask, and
    which change running services and always ask.
 
@@ -108,7 +109,7 @@ object, and a `PATCH` with any field answers `validation_failed`. The key is nev
 
 ### `POST /connectors/render/connect`
 
-Body `{ "api_key": "<key>" }`, 1 to 200 characters. Answers 202. An empty or missing key answers `validation_failed`.
+Body `{ "api_key": "<key>" }`, 8 to 200 characters. Answers 202. A missing, blank, shorter or longer key answers `validation_failed`.
 
 ### `DELETE /connectors/render/sign-in`, `DELETE /connectors/render/credentials`
 

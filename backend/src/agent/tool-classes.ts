@@ -12,9 +12,10 @@ import { redact } from '../action-log/redact';
  * - `ask` (Notion, Shortcut, Render): a write asks the operator in every Access mode but `full`. A delete, and any tool no
  *   class places, asks in every Access mode. The classes are lists of tool names (Notion, Render), or for a server that
  *   publishes no names, `verbs`: words of the tool name, split at `-` and `_`. The first group with a word in the
- *   name wins: destructive, then write, then read.
+ *   name wins: destructive, then write, then read. A read needs every word to be a read word or a `noun` the server
+ *   names things by, so a name with a word nothing places (`mark`, `reorder`) is not run unasked.
  */
-type Verbs = { destructive: string[]; write: string[]; read: string[] };
+type Verbs = { destructive: string[]; write: string[]; read: string[]; nouns: string[] };
 
 type ToolClasses = {
   service: string;
@@ -167,8 +168,112 @@ const CLASSES: Record<string, ToolClasses> = {
         'apply',
         'approve',
         'publish',
+        'mark',
+        'replace',
+        'reorder',
+        'complete',
+        'close',
+        'reopen',
+        'transition',
+        'rename',
+        'convert',
+        'import',
+        'send',
+        'post',
+        'reply',
+        'resolve',
+        'restore',
+        'duplicate',
+        'copy',
+        'clone',
+        'sort',
+        'reset',
+        'sync',
+        'attach',
+        'detach',
+        'invite',
+        'change',
+        'edit',
+        'toggle',
+        'enable',
+        'disable',
+        'submit',
+        'vote',
+        'follow',
+        'unfollow',
+        'subscribe',
       ],
       read: ['get', 'search', 'list', 'find', 'read', 'whoami', 'current'],
+      // What a read names: the things in Shortcut, and the small words between them.
+      nouns: [
+        'story',
+        'stories',
+        'epic',
+        'epics',
+        'iteration',
+        'iterations',
+        'objective',
+        'objectives',
+        'label',
+        'labels',
+        'team',
+        'teams',
+        'member',
+        'members',
+        'workflow',
+        'workflows',
+        'doc',
+        'docs',
+        'document',
+        'documents',
+        'comment',
+        'comments',
+        'project',
+        'projects',
+        'group',
+        'groups',
+        'custom',
+        'field',
+        'fields',
+        'user',
+        'users',
+        'history',
+        'branch',
+        'name',
+        'id',
+        'ids',
+        'by',
+        'external',
+        'link',
+        'links',
+        'public',
+        'all',
+        'me',
+        'my',
+        'mine',
+        'subtask',
+        'subtasks',
+        'task',
+        'tasks',
+        'relation',
+        'relations',
+        'file',
+        'files',
+        'state',
+        'states',
+        'type',
+        'types',
+        'status',
+        'category',
+        'categories',
+        'milestone',
+        'milestones',
+        'repo',
+        'repos',
+        'repository',
+        'repositories',
+        'search',
+      ],
     },
   },
   [serverOf(ConnectorId.Render)]: {
@@ -260,7 +365,9 @@ function classOf(classes: Extract<ToolClasses, { policy: 'ask' }>, tool: string)
     const has = (group: string[]) => words.some((word) => group.includes(word));
     if (has(classes.verbs.destructive)) return 'destructive';
     if (has(classes.verbs.write)) return 'write';
-    return has(classes.verbs.read) ? 'read' : 'destructive';
+    const known = [...classes.verbs.read, ...classes.verbs.nouns];
+    // A read has a read word and no word nothing places: `stories-get-and-complete` may complete a story.
+    return has(classes.verbs.read) && words.every((word) => known.includes(word)) ? 'read' : 'destructive';
   }
   if (classes.reads.includes(tool)) return 'read';
   return classes.writes.includes(tool) ? 'write' : 'destructive';
@@ -294,8 +401,8 @@ export function toolNote(server: string): string {
       `${classes.service} can be read and changed. Its tools are sorted by the words of their names, split at - and _.`,
       `A name with ${destructive.join(', ')} in it deletes or archives and always asks the operator, in every Access mode.`,
       `Else a name with ${write.join(', ')} in it changes things and asks the operator first, unless the Session has Full access.`,
-      `Else a name with ${read.join(', ')} in it reads and runs.`,
-      `A tool the console cannot place always asks too.`,
+      `Else a name with ${read.join(', ')} in it, and no other verb, reads and runs.`,
+      `A tool the console cannot place, or one with a word it does not know beside a read word, always asks too.`,
     ].join(' ');
   }
   const reads = `Read it with ${names(classes.reads)}.`;
@@ -309,13 +416,20 @@ export function toolNote(server: string): string {
   ].join(' ');
 }
 
+/** Whether `toolName` is a tool of a server with classes, under any of the names that server can carry. */
+export function isClassedTool(toolName: string): boolean {
+  const call = mcpTool(toolName);
+  return call !== null && classesFor(call.server) !== null;
+}
+
 /** The servers with classes. */
 export const CLASSED_SERVERS = Object.keys(CLASSES);
 
 const CAP = 120;
 const PIECES = 5;
 /** The inputs that say what a call acts on and what it writes: ids, titles and text. */
-const MAIN_INPUT = /^(?:.*_ids?|.*[a-z]Ids?|ids?|title|name|text|content|new_str|comment|rich_text|query|sql)$/;
+const MAIN_INPUT =
+  /^(?:.*_ids?|.*[a-z]Ids?|ids?|title|name|text|content|new_str|comment|rich_text|query|sql|command|archived|archive)$/;
 const IS_ID = /(?:^|_)ids?$|[a-z]Ids?$/;
 
 const cap = (text: string) => (text.length > CAP ? `${text.slice(0, CAP)}…` : text);
@@ -338,7 +452,7 @@ function mainInputs(value: unknown, key: string, depth: number, out: string[]): 
   if (names) {
     // A list of pairs shows its names only: the values are the secrets.
     out.push(`${key} ${cap(redact(names.join(', ')))}`);
-  } else if (typeof value === 'string' || typeof value === 'number') {
+  } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     if (MAIN_INPUT.test(key))
       out.push(IS_ID.test(key) ? `${key} ${cap(redact(String(value)))}` : `"${cap(redact(String(value)))}"`);
   } else if (Array.isArray(value)) {

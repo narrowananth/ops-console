@@ -139,6 +139,7 @@ import { CONSOLE_SUBAGENTS } from './subagents';
 import {
   askSummary,
   CLASSED_SERVERS,
+  isClassedTool,
   type ToolAsk,
   toolAsk,
   toolNote,
@@ -1729,6 +1730,20 @@ export class AgentRuntime implements OnModuleDestroy {
             hookEventName: 'PreToolUse',
             permissionDecision: 'deny',
             permissionDecisionReason: refusal,
+          },
+        };
+      }
+      // A job, or a pull request's Session, reads text the operator did not write: a server with classes is out of reach
+      // under any name it can carry, which `deniedMcpServers` (exact names) cannot say.
+      if (isClassedTool(input.tool_name) && !isOperatorChat(run)) {
+        const reason =
+          'This service is not available in this run: a job or a pull request reads text the operator did not write.';
+        this.steps.finish(input.tool_use_id, { ok: false, error: reason });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: reason,
           },
         };
       }

@@ -1230,11 +1230,14 @@ function unreachable(error: unknown): Reading {
 }
 
 /** A stdio server that holds a key says so, in its failure, when the service refuses it. */
-const REFUSED_KEY = /\b(?:401|403|unauthori[sz]ed|forbidden|invalid (?:api )?(?:key|token))\b/i;
+// A status number stands alone: `retry in 401ms` and `10.4.0.3` are not a refusal.
+const REFUSED_KEY = /(?<![\w.])(?:401|403)(?![\w.])|\b(?:unauthori[sz]ed|forbidden|invalid (?:api )?(?:key|token))\b/i;
 
 /** The key Render's Connect needs, trimmed by the body's schema; 422 `validation_failed` without one. */
 function renderKey(input: ConnectInput): string {
   if (input.api_key === undefined) throw validationFailed('an API key is required');
+  // A shorter value is no Render key, and scrubbing it from an error would hide every letter it holds.
+  if (input.api_key.length < 8) throw validationFailed('that is too short to be a Render API key');
   return input.api_key;
 }
 

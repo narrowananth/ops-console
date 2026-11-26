@@ -594,6 +594,28 @@ describe('Figma Connector, read only', () => {
     expect(append(daemon)).not.toMatch(/figma/i);
   });
 
+  it('refuses a job and a pull request’s Session the tools of a classed server under any name, with no Approval', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    for (const name of [
+      'mcp__claude_ai_Notion__notion-search',
+      'mcp__plugin_notion_notion__notion-fetch',
+      'mcp__Shortcut__stories-get-by-id',
+    ]) {
+      daemon.sdk.script({ tool: name, input: {} });
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
+      expect(
+        daemon.sdk.ran.map((call) => call.tool),
+        name,
+      ).not.toContain(name);
+    }
+    // The operator's own chat still reaches such a tool: only its Approval rules apply.
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ tool: 'mcp__claude_ai_Notion__notion-search', input: {} });
+    await converse(daemon, id, 'look it up');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toContain('mcp__claude_ai_Notion__notion-search');
+  });
+
   it('tells a job nothing about Figma', async () => {
     const daemon = await start();
     connect(daemon, HealthStatus.Ok);

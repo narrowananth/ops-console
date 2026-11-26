@@ -1458,7 +1458,14 @@ describe('Render Connector', () => {
 
   it('refuses a missing, blank or oversized key before anything starts', async () => {
     const ctx = await start();
-    for (const body of [{}, { api_key: '' }, { api_key: '   ' }, { api_key: 'k'.repeat(201) }]) {
+    // A key of under 8 characters is no Render key, and scrubbing it would hide every letter it holds in an error.
+    for (const body of [
+      {},
+      { api_key: '' },
+      { api_key: '   ' },
+      { api_key: 'k'.repeat(7) },
+      { api_key: 'k'.repeat(201) },
+    ]) {
       const refused = await api(ctx.daemon).post('/connectors/render/connect', body);
       expect(refused.status, JSON.stringify(body)).toBe(400);
       expect(refused.body.error.code).toBe('validation_failed');
@@ -1507,6 +1514,26 @@ describe('Render Connector', () => {
       () => one(ctx, 'render'),
       (row) => row.status === 'fail',
       'the failed check',
+    );
+  });
+
+  it('reads a number that only looks like a refusal as a failure, and a refusal as a refused key', async () => {
+    const ctx = await start();
+    for (const dir of ctx.dirs)
+      ctx.probe.set(dir, 'render', { status: 'failed', error: 'did not start, retry in 401ms' });
+    await connectWith(ctx, KEY);
+    await until(
+      () => one(ctx, 'render'),
+      (row) => row.status === 'fail' && row.sign_in === null,
+      'the failed start',
+    );
+    for (const dir of ctx.dirs)
+      ctx.probe.set(dir, 'render', { status: 'failed', error: 'Render answered 401 Unauthorized' });
+    await api(ctx.daemon).post('/mcp-servers/render/checks', {});
+    await until(
+      () => one(ctx, 'render'),
+      (row) => row.status === 'auth',
+      'the refused key',
     );
   });
 

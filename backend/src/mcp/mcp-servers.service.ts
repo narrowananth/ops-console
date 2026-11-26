@@ -878,7 +878,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       if (generation !== this.generation) return result;
       const before = this.probes.get(key);
       this.probes.set(key, result);
-      this.announce(before, result, names);
+      await this.announce(before, result, names);
       return result;
     })().finally(() => {
       if (this.probing.get(key) === run) this.probing.delete(key);
@@ -888,13 +888,17 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** `connection.checked` for each server whose reading moved, so an open list reads again. */
-  private announce(before: Probed | undefined, after: Probed, names: string[]): void {
+  private async announce(before: Probed | undefined, after: Probed, names: string[]): Promise<void> {
     const read = (probed: Probed | undefined, name: string) => {
       const server = probed?.servers?.get(name);
       return probed === undefined ? 'unread' : `${probed.servers === null}|${server?.status}|${server?.tools.length}`;
     };
     const moved = names.filter((name) => read(before, name) !== read(after, name));
     if (moved.length === 0) return;
+    // The keys are read from the Keychain, not the in-memory copy: after a restart that copy is empty until first used.
+    const secrets = new Map(
+      await Promise.all(moved.map(async (name) => [name, envSecrets(await this.storedEnv(name))] as const)),
+    );
     this.store.write((_tx, emit) => {
       for (const name of moved) {
         const server = after.servers?.get(name);
@@ -902,7 +906,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           target: CheckTarget.McpServer,
           id: name,
           status: server?.status === 'connected' ? HealthStatus.Ok : server ? HealthStatus.Auth : HealthStatus.Fail,
-          detail: server?.error ? scrub(server.error, envSecrets(this.envs.get(name) ?? {})) : null,
+          detail: server?.error ? scrub(server.error, secrets.get(name) ?? []) : null,
           latency_ms: null,
         });
       }

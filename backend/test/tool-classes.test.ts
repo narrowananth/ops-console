@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { askSummary, toolAsk, toolNote, toolRefusal, toolRefusals } from '../src/agent/tool-classes';
+import { askSummary, isClassedTool, toolAsk, toolNote, toolRefusal, toolRefusals } from '../src/agent/tool-classes';
 
 const FIGMA_READS = [
   'get_design_context',
@@ -208,12 +208,22 @@ describe('the tool classes of the Notion server (ask)', () => {
     const ask = { service: 'Notion', tool: 'notion-update-page', destructive: false };
     expect(
       askSummary(ask, { page_id: '1f3a-9', command: 'update_properties', properties: { title: 'Release notes' } }),
-    ).toBe('notion-update-page, page_id 1f3a-9, "Release notes"');
+    ).toBe('notion-update-page, page_id 1f3a-9, "update_properties", "Release notes"');
     const long = askSummary(ask, { page_id: 'p', content: 'x'.repeat(5000) });
     expect(long.length).toBeLessThan(200);
     expect(long).toContain('…');
     expect(askSummary(ask, { page_id: 'p', content: 'use token=hunter2 for it' })).not.toContain('hunter2');
     expect(askSummary(ask, {})).toBe('notion-update-page');
+  });
+
+  it('shows what an update does: its command and whether it archives', () => {
+    const ask = { service: 'Notion', tool: 'notion-update-page', destructive: false };
+    expect(askSummary(ask, { page_id: 'p1', command: 'replace_content', new_str: 'x' })).toBe(
+      'notion-update-page, page_id p1, "replace_content", "x"',
+    );
+    expect(askSummary({ ...ask, service: 'Shortcut', tool: 'stories-update' }, { story_id: 7, archived: true })).toBe(
+      'stories-update, story_id 7, "true"',
+    );
   });
 });
 
@@ -271,6 +281,26 @@ describe('the tool classes of the Shortcut server (ask, by the words of the name
   it('asks about a delete in every mode, and so does a name no group places', () => {
     for (const tool of [...SHORTCUT_DELETES, 'iterations-frobnicate', 'x', 'stories', 'getstory']) {
       expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: true });
+    }
+  });
+
+  it('asks about a name that holds a read word and a word no group places, since the unknown word may change things', () => {
+    for (const tool of [
+      'notifications-mark-read',
+      'stories-find-and-replace',
+      'stories-list-and-reorder',
+      'stories-get-and-complete',
+      'stories-get-and-transition',
+    ]) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).not.toBeNull();
+    }
+    // The change verbs a tool can carry are write words, so they ask, and Full access skips the question.
+    for (const tool of ['stories-mark-complete', 'stories-reorder', 'stories-close', 'iterations-rename']) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: false });
+    }
+    // The nouns a read names stay reads.
+    for (const tool of ['workflows-list', 'objectives-get-by-id', 'documents-search', 'teams-list', 'members-list']) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toBeNull();
     }
   });
 
@@ -392,6 +422,25 @@ const RENDER_WRITES = [
 ];
 
 const RENDER_DESTRUCTIVE = ['trigger_deploy', 'update_environment_variables', 'approve_blueprint'];
+
+describe('which tools belong to a server with classes', () => {
+  it('names a tool of a classed server under any of its names, so a job can be refused it', () => {
+    for (const tool of [
+      'mcp__notion__notion-search',
+      'mcp__claude_ai_Notion__notion-search',
+      'mcp__plugin_notion_notion__notion-fetch',
+      'mcp__Shortcut__stories-get-by-id',
+      'mcp__claude_ai_Render__list_services',
+      'mcp__figma__whoami',
+      'mcp__figma-desktop__get_metadata',
+    ]) {
+      expect(isClassedTool(tool), tool).toBe(true);
+    }
+    for (const tool of ['mcp__sentry__get_issue', 'mcp__my__notion__x', 'Bash', 'mcp__github__list_issues']) {
+      expect(isClassedTool(tool), tool).toBe(false);
+    }
+  });
+});
 
 describe('the tool classes of the Render server (ask, by lists)', () => {
   it('lets a read through, workflow reads and select_workspace included, and asks about nothing', () => {
