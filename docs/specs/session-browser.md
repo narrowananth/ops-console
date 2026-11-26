@@ -62,10 +62,11 @@ adds the same to a Session.
     every 30 seconds while a panel is open. The console's own ports (4545, 4555, 4556) are never listed, nor is a port of the agent's own `claude` process, which runs the Run sandbox's proxy. A server that is the Session's but that no Session
     process owns, such as one started with `nohup` that outlived its terminal, shows a Stop button. Stop ends that process
     and what it started (by parent links, never by process group).
-11a. When a process started while the Session is open begins listening, its page opens in the Browser panel with no
-    click: the panel opens, and the page goes in the tab already on that site, which reloads, else the blank tab or a new one. A server already listening when the Session
+11a. When a process the operator started while the Session is open begins listening, its page opens in the Browser panel
+    with no click: the panel opens, and the page goes in the tab already on that site, which reloads, else the blank tab or a new one. A server already listening when the Session
     opened is not opened, and each port opens once. A process that listens but serves no page, such as a database, opens a
-    tab that shows the error; the operator closes it.
+    tab that shows the error; the operator closes it. A process the agent started opens no page by itself
+    ([agent-servers-no-auto-open](agent-servers-no-auto-open.md)).
 
 ### Links
 
