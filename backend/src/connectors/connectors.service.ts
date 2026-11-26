@@ -1082,6 +1082,7 @@ export const SERVER_ONLY: ConnectorId[] = [
   ConnectorId.Sentry,
   ConnectorId.Shopify,
   ConnectorId.Figma,
+  ConnectorId.Notion,
 ];
 
 type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;

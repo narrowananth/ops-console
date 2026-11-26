@@ -11,8 +11,8 @@ already be added in Integrations without one, which is the route for local devel
 
 ## Today
 
-Seventeen Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
-Google Drive, four log sources (OpenTelemetry, CloudWatch, Loki, New Relic) and Figma, which is read only. Jira's Atlassian server also reaches
+Eighteen Connectors: Datadog, Jira, GitHub, GitLab, Bitbucket, Slack, Sentry, Shopify, slashdocs, Google Docs, Google Sheets,
+Google Drive, four log sources (OpenTelemetry, CloudWatch, Loki, New Relic), Figma, which is read only, and Notion, whose changes ask. Jira's Atlassian server also reaches
 Confluence. Database Connections cover Postgres, MongoDB, Redis, ClickHouse, Firebase and Kafka.
 
 ## The stack this plan assumes
@@ -49,7 +49,7 @@ Read from the console's own screens, not confirmed by the operator. Correct it a
 | Step | Connector | Why now | Route | Tools the agent gets |
 | ---- | --------- | ------- | ----- | -------------------- |
 | 0 | Tool classes | Every item sorts its tools into read, write and destructive | Console | The class decides run, ask or always ask |
-| 1 | Figma | First request: design to code from Sessions | Hosted MCP | 20 read tools only |
+| 1 | Figma | First request: design to code from Sessions | Hosted MCP | 29 read tools only |
 | 2 | Notion | Requested: specs and docs in a Session | Hosted MCP | All tools: 21 read, 19 write found so far |
 | 3 | Shortcut | Requested: stories and iterations | Console bridge on the REST API | Reads and writes on the main resources |
 | 4 | Render | Requested: services, deploys, logs | Hosted MCP with an API key | All tools: 16 read, the rest write |
@@ -64,9 +64,15 @@ Read from the console's own screens, not confirmed by the operator. Correct it a
 
 Items 5 to 12 are proposals. Each needs a yes from the operator that the service is in use before its spec is written.
 
+## 0. Tool classes
+
+**Status:** built, in `agent/tool-classes.ts`. A server's policy is `read-only` (Figma: refuse what the Read list does not name) or
+`ask` (Notion: a write asks in every Access mode but `full`, a delete and any unlisted tool ask in every mode). The Approval is
+a `command` one with an Action Log row before the call.
+
 ## 1. Figma
 
-**Status:** built, read list and Connect. The sign-in against Figma and a real read are not yet run (the spike below).
+**Status:** built, read list and Connect. The list follows the real server: 29 reads. The sign-in against Figma and a real read are not yet run (the spike below).
 
 Read only, every kind of read: files, frames, variables and styles, comments, FigJam, Code Connect mappings, libraries, and
 images exported from a file. Nothing is written to Figma. Figma's write tools depend on the plan and seat, so the operator
@@ -82,11 +88,14 @@ chose reads only.
 - Read list (from the tools page): `get_design_context`, `get_screenshot`, `get_metadata`, `get_variable_defs`,
   `get_figjam`, `get_comments`, `get_code_connect_map`, `get_code_connect_suggestions`, `get_context_for_code_connect`,
   `get_libraries`, `search_design_system`, `get_motion_context`, `get_shader`, `list_shaders`, `list_file_shaders`,
-  `get_generative_plugin`, `list_generative_plugins`, `download_assets`, `export_video`, `whoami`.
+  `get_generative_plugin`, `list_generative_plugins`, `download_assets`, `export_video`, `whoami`, `create_session`, and the
+  Weave reads `weave_find_model`, `weave_get_model_run_output`, `weave_get_node_catalog`, `weave_get_tool_inputs`,
+  `weave_get_tool_run_output`, `weave_get_workflow`, `weave_list_tools`, `weave_search_workspace`.
 - Refused: `use_figma`, `generate_figma_design`, `html_to_figma`, `send_code_to_figma`, `upload_assets`,
-  `add_code_connect_map`, `send_code_connect_mappings`, `create_new_file`, `generate_diagram`, `generate_image`,
+  `add_code_connect_map`, `send_code_connect_mappings`, `create_new_file`, `create_branch`, `generate_diagram`, `generate_image`,
   `generate_vector_illustration`, `create_generative_plugin`, `update_generative_plugin`, `create_shader`, `update_shader`,
-  and any tool not on the read list.
+  `weave_build_workflow`, `weave_run_tool`, `weave_run_model`, `weave_upload_asset`, `weave_cancel_tool_run`,
+  `weave_request_report`, and any tool not on the read list.
 - Limits Figma sets: Dev and Full seats on Professional get 200 calls a day and 10 a minute, Organization 200 and 15,
   Enterprise 600 and 20. View and Collab seats get 20 a month. Starter plans get none. The pane says so.
 - Spec: [figma-connector](specs/figma-connector.md).
@@ -97,6 +106,8 @@ chose reads only.
   - [REST API](https://developers.figma.com/docs/rest-api/) and its scopes page, for the fallback
 
 ## 2. Notion
+
+**Status:** built, Connect and the classes. The sign-in against Notion and a real read and write are not yet run.
 
 - Route: hosted MCP at `https://mcp.notion.com/mcp`, Streamable HTTP. The older `/sse` address retires on 2027-02-23.
   The open-source local server is no longer maintained.
@@ -116,6 +127,7 @@ chose reads only.
   page deletion moves content to Trash.
   Not yet read in the documentation: files, skills and agents, calendars. They count as destructive until read and listed.
 - Limits: 180 requests a minute per connection, 600 on Business and Enterprise.
+- Spec: [notion-connector](specs/notion-connector.md).
 - Documentation:
   - [Get started with the Notion MCP server](https://developers.notion.com/docs/get-started-with-mcp)
   - [Supported tools](https://developers.notion.com/guides/mcp/mcp-supported-tools)

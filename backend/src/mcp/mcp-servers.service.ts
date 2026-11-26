@@ -101,6 +101,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   private readonly leaving = new Set<string>();
   /** Background Removes, one after another. */
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * Registrations, one after another. Each copies the entry `claude mcp add` wrote into every other account's config
+   * file by reading and writing the whole file, so two at once can overwrite each other and lose a server.
+   */
+  private registering: Promise<void> = Promise.resolve();
   /** Bumped when the config changes, so a Probe started before then is not kept. */
   private generation = 0;
   private readonly logins = new Set<AbortController>();
@@ -539,7 +544,17 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** Adds (or, when `previous` is given, replaces) the server in every account; a failure undoes the accounts done. */
-  private async register(
+  private register(...args: Parameters<McpServersService['registerNow']>): Promise<void> {
+    const run = this.registering.then(() => this.registerNow(...args));
+    // A failure rejects the caller and leaves the next registration free to start.
+    this.registering = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async registerNow(
     name: string,
     scope: McpScope,
     transport: McpTransport,

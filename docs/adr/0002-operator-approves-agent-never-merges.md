@@ -40,6 +40,13 @@ own git access, never forced. A branch that moved on origin is rebased onto the 
 stops with the branch untouched. When the branch has a pull request already, the push updates it. The agent never pushes
 or opens one itself: it is told so, and `git push` is denied in the PR Session and a Verification.
 
+The agent also changes a service outside this Mac, Notion, only by asking. Its tools are sorted into Tool classes: a read
+runs, a write raises an Approval in every Access mode but full, and a delete, or any tool the list does not name, raises
+one in every mode, full included. The Approval is a `command` one with no PROD tag, and an Action Log row, holding the
+tool and a capped, redacted summary of its main inputs, is written before the call. A no is final, as for `save_file`.
+Jobs and a pull request's Session reach no Notion server, so text from logs or a pull request starts no Notion call. Figma
+is read only instead: every tool off its Read list is refused with no Approval.
+
 A file for the operator goes in the Session's output folder, where the console shows it. To put a copy in another
 folder, such as `~/Downloads`, the agent calls the console's `save_file` tool with a file or folder name from that
 folder and an absolute folder path. A folder is copied as a new folder of that name, with one Approval that lists its
@@ -108,6 +115,11 @@ request text stays data, never instructions. A general comment on the pull reque
   lost because the Approval already shows the count and the operator decides. Every Spawned Session runs at once, and each
   boots its own Claude Code process with every Connection's MCP server, so a large batch slows the console. That cost
   is accepted.
+- **Refuse every Notion write, as Figma's**: the operator wants to write back, and Figma is read only by choice.
+- **Ask for every Notion tool, reads too**: a Session reading a spec would stop at each search.
+- **Run a Notion tool no list names, as a read**: a new delete would run unasked. It asks until the list names it.
+- **Skip the Notion delete Approval in full access**: deleting in a service outside this Mac is the one thing Full access
+  should still ask about.
 - **An Approval per Spawned Session**: one click per Repo, each reading one task. It lost because the operator reads the
   whole list once, and a yes per Repo gave back most of the time the batch saves.
 - **The console's own tools ask in every Access mode, `full` included** (`save_file`, `spawn_sessions`, `join_repo`,
@@ -140,8 +152,9 @@ another Repo, a Spawned Session cannot start others, and the tool is offered onl
 in a job that read log or pull request text.
 
 A Session in full access can have the daemon run an integration write as the operator, start a process outside the
-sandbox, move into a Repo, start a batch of Sessions or save a file outside its folders with no click. Steered by text it
-read, it could do any of these; the operator who set Full access chose that, and a PROD write still asks.
+sandbox, move into a Repo, start a batch of Sessions, save a file outside its folders or change Notion pages with no
+click. Steered by text it read, it could do any of these; the operator who set Full access chose that, and a PROD write, a
+Notion delete and a Notion tool no list names still ask.
 
 An approved `save_file` writes where the operator was shown: the daemon replaces a file of that name in the destination,
 which the card says, refuses a folder whose name is taken, and checks nothing else about the destination but that it

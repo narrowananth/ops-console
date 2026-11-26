@@ -25,6 +25,8 @@ export enum ConnectorId {
   NewRelicLogs = 'new_relic_logs',
   /** Figma's designs, read through its hosted MCP server. Read only: the console refuses every tool off the Read list. */
   Figma = 'figma',
+  /** Notion's pages and databases, through its hosted MCP server. Its tools are sorted into Tool classes: a change asks, a delete always asks. */
+  Notion = 'notion',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -66,6 +68,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.LokiLogs]: 'Loki logs',
   [ConnectorId.NewRelicLogs]: 'New Relic logs',
   [ConnectorId.Figma]: 'Figma',
+  [ConnectorId.Notion]: 'Notion',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -87,6 +90,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.LokiLogs]: 'Grafana Cloud MCP',
   [ConnectorId.NewRelicLogs]: 'New Relic MCP',
   [ConnectorId.Figma]: 'Figma MCP',
+  [ConnectorId.Notion]: 'Notion MCP',
 };
 
 /**
@@ -148,6 +152,8 @@ export const CONNECTOR_SERVERS: Partial<
   [ConnectorId.NewRelicLogs]: { name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US },
   // Figma's hosted server. It takes the sign-in of Claude Code's own client, so none is pinned here.
   [ConnectorId.Figma]: { name: 'figma', transport: McpTransport.Http, target: 'https://mcp.figma.com/mcp' },
+  // Notion's hosted server registers its own OAuth client (dynamic client registration), so none is pinned here.
+  [ConnectorId.Notion]: { name: 'notion', transport: McpTransport.Http, target: 'https://mcp.notion.com/mcp' },
   // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
   [ConnectorId.CloudWatchLogs]: {
     name: 'cloudwatch',
@@ -268,6 +274,7 @@ export const connectorConfigSchemas = {
     reports_folder: z.string().min(1),
   }),
   [ConnectorId.Figma]: z.strictObject({}),
+  [ConnectorId.Notion]: z.strictObject({}),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -343,6 +350,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     reports_folder: 'reports',
   },
   [ConnectorId.Figma]: {},
+  [ConnectorId.Notion]: {},
 };
 
 /**

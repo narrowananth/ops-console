@@ -844,13 +844,13 @@ describe('Google Connectors', () => {
   it('lists the three after slashdocs, off, with an empty config', async () => {
     const ctx = await start({ google: 'shipped' });
     const rows = await list(ctx);
-    expect(rows).toHaveLength(17);
-    expect(rows.slice(-8, -5).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
+    expect(rows).toHaveLength(18);
+    expect(rows.slice(-9, -6).map((row) => [row.id, row.name, row.via, row.status, row.config])).toEqual([
       ['google_docs', 'Google Docs', 'Google Docs API', 'off', {}],
       ['google_sheets', 'Google Sheets', 'Google Sheets API', 'off', {}],
       ['google_drive', 'Google Drive', 'Google Drive API', 'off', {}],
     ]);
-    expect(rows.map((row) => row.id).slice(-9)).toEqual([
+    expect(rows.map((row) => row.id).slice(-10)).toEqual([
       'slashdocs',
       ...GOOGLE,
       'otel_logs',
@@ -858,6 +858,7 @@ describe('Google Connectors', () => {
       'loki_logs',
       'new_relic_logs',
       'figma',
+      'notion',
     ]);
     // Nothing is typed in the pane.
     expect((await api(ctx.daemon).patch('/connectors/google_docs', { config: { client_id: 'x' } })).status).toBe(400);
@@ -1084,9 +1085,9 @@ describe('Google Connectors', () => {
 describe('Figma Connector', () => {
   const serverIn = (dir: string) => JSON.parse(readFileSync(path.join(dir, '.claude.json'), 'utf8')).mcpServers?.figma;
 
-  it('lists Figma last, off, with an empty config that takes no field', async () => {
+  it('lists Figma after the log sources, off, with an empty config that takes no field', async () => {
     const ctx = await start();
-    expect((await list(ctx)).at(-1)).toMatchObject({
+    expect((await list(ctx)).at(-2)).toMatchObject({
       id: 'figma',
       name: 'Figma',
       via: 'Figma MCP',
@@ -1190,6 +1191,140 @@ describe('Figma Connector', () => {
   });
 });
 
+describe('Notion Connector', () => {
+  const serverIn = (dir: string) => JSON.parse(readFileSync(path.join(dir, '.claude.json'), 'utf8')).mcpServers?.notion;
+
+  it('lists Notion last, off, with an empty config that takes no field', async () => {
+    const ctx = await start();
+    expect((await list(ctx)).at(-1)).toMatchObject({
+      id: 'notion',
+      name: 'Notion',
+      via: 'Notion MCP',
+      status: 'off',
+      config: {},
+    });
+    const bad = await api(ctx.daemon).patch('/connectors/notion', { config: { file: 'abc' } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe('validation_failed');
+  });
+
+  it("registers Notion's hosted server in every account with no body, signs in once, and follows the server", async () => {
+    const ctx = await start();
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'notion', { status: 'needs-auth' });
+    expect((await api(ctx.daemon).post('/connectors/notion/connect', {})).status).toBe(202);
+    await until(
+      () => one(ctx, 'notion'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    for (const dir of ctx.dirs) {
+      expect(serverIn(dir)).toMatchObject({ type: 'http', url: 'https://mcp.notion.com/mcp' });
+      // Notion registers its own OAuth client: nothing is pinned for the sign-in.
+      expect(serverIn(dir).oauth).toBeUndefined();
+    }
+    expect(await mcpServer(ctx, 'notion')).toMatchObject({ transport: 'http', used_by: 'notion' });
+    const [active, other] = ctx.dirs as [string, string];
+    expect(existsSync(path.join(active, 'fake-mcp-auth.json'))).toBe(true);
+    expect(existsSync(path.join(other, 'fake-mcp-auth.json'))).toBe(false);
+
+    for (const dir of ctx.dirs) ctx.probe.set(dir, 'notion', { status: 'failed', error: 'connection refused' });
+    await api(ctx.daemon).post('/mcp-servers/notion/checks', {});
+    await until(
+      () => one(ctx, 'notion'),
+      (row) => row.status === 'fail',
+      'the failed check',
+    );
+  });
+
+  it("leaves auth with Notion's reason when it refuses the sign-in, and Connect tries again", async () => {
+    const ctx = await start();
+    process.env.FAKE_MCP_LOGIN = 'fail';
+    try {
+      for (const dir of ctx.dirs) ctx.probe.set(dir, 'notion', { status: 'needs-auth' });
+      await api(ctx.daemon).post('/connectors/notion/connect', {});
+      const failed = await until(
+        () => one(ctx, 'notion'),
+        (row) => row.status === 'auth' && row.sign_in === null && row.status_detail !== null,
+        'the refusal',
+      );
+      expect(failed.status_detail).toContain('Incompatible auth server');
+    } finally {
+      delete process.env.FAKE_MCP_LOGIN;
+    }
+    await api(ctx.daemon).post('/connectors/notion/connect', {});
+    await until(
+      () => one(ctx, 'notion'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the second sign-in',
+    );
+  });
+
+  it('reads fail when the server is turned off, and Connect turns it back on', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/notion/connect', {});
+    await until(
+      () => one(ctx, 'notion'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in',
+    );
+    await api(ctx.daemon).patch('/mcp-servers/notion', { enabled: false });
+    expect((await api(ctx.daemon).post('/connectors/notion/checks', {})).body.data).toMatchObject({
+      status: 'fail',
+      status_detail: 'notion is turned off in MCP servers',
+    });
+    await api(ctx.daemon).post('/connectors/notion/connect', {});
+    await until(
+      () => one(ctx, 'notion'),
+      (row) => row.status === 'ok' && row.sign_in === null,
+      'the sign-in again',
+    );
+    expect(await mcpServer(ctx, 'notion')).toMatchObject({ enabled: true });
+  });
+
+  it('removes the server on Disconnect and leaves the other Connectors as they were', async () => {
+    const ctx = await start();
+    await api(ctx.daemon).post('/connectors/jira/connect', {});
+    await api(ctx.daemon).post('/connectors/notion/connect', {});
+    for (const id of ['jira', 'notion']) {
+      await until(
+        () => one(ctx, id),
+        (row) => row.status === 'ok' && row.sign_in === null,
+        `the ${id} sign-in`,
+      );
+    }
+    const off = await api(ctx.daemon).delete('/connectors/notion/credentials');
+    expect(off.body.data).toMatchObject({ status: 'off', login: null, account_label: null });
+    expect(await mcpServer(ctx, 'notion')).toMatchObject({ registered: false });
+    expect(await mcpServer(ctx, 'atlassian')).toMatchObject({ registered: true });
+    expect((await one(ctx, 'jira')).status).toBe('ok');
+  });
+});
+
+describe('Connectors connected at the same moment', () => {
+  const serversIn = (dir: string): string[] =>
+    Object.keys(JSON.parse(readFileSync(path.join(dir, '.claude.json'), 'utf8')).mcpServers ?? {}).sort();
+
+  it('register every server in every account, none lost to another registration under way', async () => {
+    for (let round = 0; round < 3; round++) {
+      const ctx = await start();
+      const ids = ['jira', 'sentry', 'figma', 'notion'];
+      await Promise.all(ids.map((id) => api(ctx.daemon).post(`/connectors/${id}/connect`, {})));
+      for (const id of ids) {
+        await until(
+          () => one(ctx, id),
+          (row) => row.sign_in === null && row.status !== 'off',
+          `the ${id} sign-in`,
+        );
+      }
+      for (const dir of ctx.dirs) {
+        expect(serversIn(dir), `round ${round}, ${path.basename(dir)}`).toEqual(
+          expect.arrayContaining(['atlassian', 'figma', 'notion', 'sentry']),
+        );
+      }
+    }
+  });
+});
+
 describe('OpenTelemetry logs Connector', () => {
   const folder = async () => mkdtemp(path.join(os.tmpdir(), 'ops-console-logs-'));
   const connect = (ctx: Ctx, body: Record<string, unknown>) =>
@@ -1203,7 +1338,7 @@ describe('OpenTelemetry logs Connector', () => {
       sign_in: null,
       config: { folder: '', environments: ['prod'], daily_scan_time: '09:00', default_interval: '24h' },
     });
-    expect((await list(ctx)).map((row) => row.id).slice(-5, -1)).toEqual([
+    expect((await list(ctx)).map((row) => row.id).slice(-6, -2)).toEqual([
       'otel_logs',
       'cloudwatch_logs',
       'loki_logs',
@@ -1991,7 +2126,7 @@ describe('New Relic logs Connector', () => {
       'reports_folder',
       'route',
     ]);
-    expect((await list(ctx)).at(-2)?.id).toBe('new_relic_logs');
+    expect((await list(ctx)).at(-3)?.id).toBe('new_relic_logs');
   });
 
   it('signs in through Claude Code with the Region’s address, reads the one account, and never signs in itself', async () => {

@@ -386,6 +386,13 @@
       "when": 1795689115456,
       "tag": "0054_connector_figma",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1795704622496,
+      "tag": "0055_connector_notion",
+      "breakpoints": true
     }
   ]
 }

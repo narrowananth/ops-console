@@ -62,6 +62,8 @@ const DISCONNECT: Partial<Record<ConnectorId, string>> = {
     'Stops the console reading New Relic and removes the New Relic MCP Server. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.',
   [ConnectorId.Figma]:
     'Stops Sessions reading Figma and removes the Figma MCP Server. Your Figma account and files stay as they are.',
+  [ConnectorId.Notion]:
+    'Stops Sessions using Notion and removes the Notion MCP Server. Your Notion account and pages stay as they are.',
 };
 
 /** What Disconnect says for New Relic logs read with a User API key. */
@@ -72,6 +74,8 @@ const NEW_RELIC_KEY_DISCONNECT =
 const NOTES: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.Figma]:
     "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none.",
+  [ConnectorId.Notion]:
+    "Sessions can read your workspace. A change asks you first, a delete always asks, and Full access skips the first. Notion's own limits apply: 180 requests a minute, 600 on Business and Enterprise.",
 };
 
 const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
@@ -80,6 +84,7 @@ const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.LokiLogs]: 'Stop the console reading Loki and remove its sign-in. Asks first.',
   [ConnectorId.NewRelicLogs]: 'Stop the console reading New Relic and remove its MCP Server. Asks first.',
   [ConnectorId.Figma]: 'Stop Sessions reading Figma and remove its MCP Server. Asks first.',
+  [ConnectorId.Notion]: 'Stop Sessions using Notion and remove its MCP Server. Asks first.',
 };
 
 /** One Connector: Connect, Reconnect or Disconnect. Nothing else is set here. */

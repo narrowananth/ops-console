@@ -21,7 +21,7 @@ A user in any timezone should get from install to a first verified alert without
 
 ## Connectors
 
-New Connectors ship one at a time, read only first: Figma, Notion, Shortcut and Render, then the mobile, operations and
+New Connectors ship one at a time: Figma (read only), Notion, Shortcut and Render, then the mobile, operations and
 product services in the order set by the stack. Plan, official documentation and open checks:
 [connectors-roadmap](connectors-roadmap.md).
 
