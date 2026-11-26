@@ -1081,6 +1081,7 @@ export const SERVER_ONLY: ConnectorId[] = [
   ConnectorId.Slack,
   ConnectorId.Sentry,
   ConnectorId.Shopify,
+  ConnectorId.Figma,
 ];
 
 type McpSpec = NonNullable<(typeof CONNECTOR_SERVERS)[ConnectorId]>;

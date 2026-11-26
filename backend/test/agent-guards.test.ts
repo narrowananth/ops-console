@@ -1,11 +1,14 @@
 import os from 'node:os';
 import path from 'node:path';
-import { AccessMode, ConnectorId, type LogSource, RunPurpose, type WsEvent } from '@ops-console/shared';
+import { AccessMode, ConnectorId, HealthStatus, type LogSource, RunPurpose, type WsEvent } from '@ops-console/shared';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { mcpScope } from '../src/agent/mcp-scope';
 import { NEW_RELIC_QUERY_TOOL } from '../src/agent/new-relic-tool';
 import { RUN_INTEGRATION_TOOL } from '../src/agent/pull-request-tool';
 import { AgentRuntime } from '../src/agent/runtime';
+import { connectors } from '../src/db/schema';
+import { STORE, type Store } from '../src/db/store';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
 import type { Step } from './fakes/agent-sdk';
 
@@ -460,6 +463,100 @@ describe('CloudWatch Connector', () => {
     ];
     for (const name of [...allowed, ...refused]) await runTool(daemon, AccessMode.Full, tool(name));
     expect(daemon.sdk.ran.map((call) => call.tool.replace('mcp__cloudwatch__', ''))).toEqual(allowed);
+  });
+});
+
+describe('Figma Connector, read only', () => {
+  const tool = (name: string): Step => ({ tool: `mcp__figma__${name}`, input: {} });
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const refused = (daemon: AgentDaemon) => calls(daemon).at(-1)?.options.disallowedTools ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors).set({ status }).where(eq(connectors.id, ConnectorId.Figma)).run();
+    });
+
+  it('runs the read tools and refuses any other tool of the server in every access mode, with no Approval', async () => {
+    const daemon = await start();
+    // A tool Figma adds later is on no list of write tools: only the Read list stops it.
+    const unknown = tool('a_tool_a_later_version_adds');
+    for (const mode of Object.values(AccessMode)) {
+      const { approvals } = await runTool(daemon, mode, unknown);
+      expect(approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran).toEqual([]);
+    await runTool(daemon, AccessMode.Full, tool('get_design_context'));
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__figma__get_design_context']);
+  });
+
+  it('answers a refused call with the reason, as a failed step of the Session', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script(tool('use_figma'));
+    await converse(daemon, id, 'make a frame');
+    expect(daemon.sdk.ran).toEqual([]);
+    const { steps } = (await api(daemon).get(`/agent-runs/${id}`)).body.data;
+    expect(steps).toEqual([
+      expect.objectContaining({
+        tool: 'mcp__figma__use_figma',
+        ok: false,
+        error: expect.stringContaining('read only'),
+      }),
+    ]);
+  });
+
+  it('leaves the write tools out of the run’s tool list', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'hello');
+    expect(refused(daemon)).toEqual(
+      expect.arrayContaining(['mcp__figma__use_figma', 'mcp__figma__create_shader', 'mcp__figma__send_code_to_figma']),
+    );
+    expect(refused(daemon)).not.toContain('mcp__figma__get_design_context');
+  });
+
+  it('starts its server for a chat and for no job', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    const denied = () =>
+      (
+        calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+      )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+    await converse(daemon, daemon.createSession(), 'look at the design');
+    expect(denied()).not.toContain('figma');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(), purpose).toContain('figma');
+    }
+  });
+
+  it('tells the agent Figma is read only only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/figma/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toContain('Figma is read only here');
+    expect(append(daemon)).toContain('mcp__figma__get_design_context');
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/figma/i);
+  });
+
+  it('tells a job nothing about Figma', async () => {
+    const daemon = await start();
+    connect(daemon, HealthStatus.Ok);
+    const runtime = daemon.app.get(AgentRuntime);
+    await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
+    expect(append(daemon)).not.toMatch(/figma/i);
   });
 });
 

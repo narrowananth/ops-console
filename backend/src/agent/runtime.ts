@@ -29,6 +29,7 @@ import {
   type EditedMessage,
   Effort,
   ErrorCode,
+  HealthStatus,
   type LogSource,
   type Message,
   type Part,
@@ -54,6 +55,7 @@ import { StartupRecovery } from '../common/recovery';
 import {
   alerts,
   connections as connectionRows,
+  connectors,
   disabledMcpServers,
   messageSkills,
   nowIso,
@@ -106,6 +108,7 @@ import {
   SPAWN_SESSIONS_TOOL,
   spawnSessionsInputSchema,
 } from './pull-request-tool';
+import { READ_LIST_SERVERS, readListDenial, readListNote, readListRefusals } from './read-lists';
 import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
@@ -1066,6 +1069,16 @@ export class AgentRuntime implements OnModuleDestroy {
     return ids.flatMap((id) => folders.get(id) ?? []).filter((folder) => folder !== workingDir);
   }
 
+  /** The MCP servers of the Connectors that are connected. */
+  private connectedServers(): string[] {
+    return this.store.db
+      .select({ id: connectors.id })
+      .from(connectors)
+      .where(eq(connectors.status, HealthStatus.Ok))
+      .all()
+      .flatMap(({ id }) => CONNECTOR_SERVERS[id]?.name ?? []);
+  }
+
   /** The MCP servers of every Connection. */
   private connectionServers(): string[] {
     return this.store.db
@@ -1242,6 +1255,23 @@ export class AgentRuntime implements OnModuleDestroy {
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
     const logSource = this.logSourceOf(session.alertId);
     const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined && session.prAction === null, logSource);
+    // Servers the operator disabled stay out of the run.
+    const deniedServers = [
+      ...this.store.db
+        .select()
+        .from(disabledMcpServers)
+        .all()
+        .map(({ name }) => name),
+      ...(kind?.deniedServers?.(session, run.purpose) ?? []),
+      ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
+      ...(scope.withoutConnections ? this.connectionServers() : []),
+      ...scope.withoutConnectors,
+    ];
+    // A server with a Read list is described only to a run that starts it, for a Connector that is connected.
+    const connected = this.connectedServers();
+    const readNotes = scope.none
+      ? []
+      : READ_LIST_SERVERS.filter((name) => connected.includes(name) && !deniedServers.includes(name)).map(readListNote);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {
@@ -1368,27 +1398,21 @@ export class AgentRuntime implements OnModuleDestroy {
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
         // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
         ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
+        // Not offered, so the agent does not plan around them; the Read list refuses a call that arrives (`beforeTool`).
+        ...readListRefusals(),
         ...run.deny,
       ],
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
-        append: systemAppend(instructions, run.rules, outputFolder, repoFolders),
+        append: systemAppend(
+          [instructions, ...readNotes].filter(Boolean).join('\n\n'),
+          run.rules,
+          outputFolder,
+          repoFolders,
+        ),
       },
-      // Servers the operator disabled stay out of the run.
-      settings: {
-        deniedMcpServers: [
-          ...this.store.db
-            .select()
-            .from(disabledMcpServers)
-            .all()
-            .map(({ name }) => name),
-          ...(kind?.deniedServers?.(session, run.purpose) ?? []),
-          ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
-          ...(scope.withoutConnections ? this.connectionServers() : []),
-          ...scope.withoutConnectors,
-        ].map((name) => ({ serverName: name })),
-      },
+      settings: { deniedMcpServers: deniedServers.map((name) => ({ serverName: name })) },
       hooks: {
         PreToolUse: [{ hooks: [this.beforeTool(run)] }],
         PostToolUse: [{ hooks: [this.afterTool(run)] }],
@@ -1686,14 +1710,15 @@ export class AgentRuntime implements OnModuleDestroy {
         tool: input.tool_name,
         summary: stepText(input.tool_name, toolInput),
       });
-      const cloudWatch = cloudWatchDenial(input.tool_name) ?? hostedLogDenial(input.tool_name);
-      if (cloudWatch !== null) {
-        this.steps.finish(input.tool_use_id, { ok: false, error: cloudWatch });
+      const refusal =
+        cloudWatchDenial(input.tool_name) ?? hostedLogDenial(input.tool_name) ?? readListDenial(input.tool_name);
+      if (refusal !== null) {
+        this.steps.finish(input.tool_use_id, { ok: false, error: refusal });
         return {
           hookSpecificOutput: {
             hookEventName: 'PreToolUse',
             permissionDecision: 'deny',
-            permissionDecisionReason: cloudWatch,
+            permissionDecisionReason: refusal,
           },
         };
       }

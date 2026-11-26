@@ -7,7 +7,8 @@ while they approve every change.
 
 Website and user docs: [opsconsole.org](https://opsconsole.org), built from `site/`. Stack, modules and
 diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [docs/diagrams](docs/diagrams). Decisions:
-[docs/adr](docs/adr). Terms: [GLOSSARY.md](GLOSSARY.md). Plans: [docs/roadmap.md](docs/roadmap.md). The screens come from
+[docs/adr](docs/adr). Terms: [GLOSSARY.md](GLOSSARY.md). Plans: [docs/roadmap.md](docs/roadmap.md), and the Connectors to build next with their official documentation in
+[docs/connectors-roadmap.md](docs/connectors-roadmap.md). The screens come from
 [design/ops-console.html](design/ops-console.html) and the layout from
 [design/ops-console-sidebar.html](design/ops-console-sidebar.html); open them in a browser.
 

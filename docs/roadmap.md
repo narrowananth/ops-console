@@ -19,6 +19,12 @@ A user in any timezone should get from install to a first verified alert without
 
 - A short video walkthrough of the flow. It needs data safe to show on camera, so it waits for the sample repo.
 
+## Connectors
+
+New Connectors ship one at a time, read only first: Figma, Notion, Shortcut and Render, then the mobile, operations and
+product services in the order set by the stack. Plan, official documentation and open checks:
+[connectors-roadmap](connectors-roadmap.md).
+
 ## 1. Linux
 
 The largest piece of work, because it changes two decisions:

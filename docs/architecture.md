@@ -372,7 +372,7 @@ Where the build departs from `design/ops-console.html` on purpose:
 - **Access Level** changes how a Connection's MCP server launches (read-only flag, config file or
   read-only user), not only the badge.
 - **Merge** is a button for the operator only; the agent has no merge tool.
-- **Connectors** add Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and four log sources (OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs).
+- **Connectors** add Sentry, Shopify, slashdocs, Google Docs, Sheets and Drive, and four log sources (OpenTelemetry logs, CloudWatch logs, Loki logs, New Relic logs), then Figma, read only through a Read list.
 - **Monitor** reads a log source per tab, lists Alerts in a table and opens one in a drawer.
 - **Health checks**: the check strip, problem banner and history stripe on Integrations and Connections, and a red count in the sidebar.
 - **Agent runs** page under Claude: run health, why a run is slow or ended, time split and every step.

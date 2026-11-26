@@ -23,6 +23,8 @@ export enum ConnectorId {
   LokiLogs = 'loki_logs',
   /** Logs of a New Relic account, read through New Relic's hosted MCP server. */
   NewRelicLogs = 'new_relic_logs',
+  /** Figma's designs, read through its hosted MCP server. Read only: the console refuses every tool off the Read list. */
+  Figma = 'figma',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -63,6 +65,7 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.CloudWatchLogs]: 'CloudWatch logs',
   [ConnectorId.LokiLogs]: 'Loki logs',
   [ConnectorId.NewRelicLogs]: 'New Relic logs',
+  [ConnectorId.Figma]: 'Figma',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -83,6 +86,7 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.CloudWatchLogs]: 'aws CLI + CloudWatch MCP',
   [ConnectorId.LokiLogs]: 'Grafana Cloud MCP',
   [ConnectorId.NewRelicLogs]: 'New Relic MCP',
+  [ConnectorId.Figma]: 'Figma MCP',
 };
 
 /**
@@ -142,6 +146,8 @@ export const CONNECTOR_SERVERS: Partial<
   [ConnectorId.LokiLogs]: { name: 'grafana', transport: McpTransport.Http, target: 'https://mcp.grafana.com/mcp' },
   // New Relic's hosted server; Connect registers the address of the Region chosen.
   [ConnectorId.NewRelicLogs]: { name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US },
+  // Figma's hosted server. It takes the sign-in of Claude Code's own client, so none is pinned here.
+  [ConnectorId.Figma]: { name: 'figma', transport: McpTransport.Http, target: 'https://mcp.figma.com/mcp' },
   // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
   [ConnectorId.CloudWatchLogs]: {
     name: 'cloudwatch',
@@ -261,6 +267,7 @@ export const connectorConfigSchemas = {
     ignore: z.array(z.strictObject({ kind: z.enum(['status_class', 'route']), value: z.string().min(1) })),
     reports_folder: z.string().min(1),
   }),
+  [ConnectorId.Figma]: z.strictObject({}),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -335,6 +342,7 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     ignore: [],
     reports_folder: 'reports',
   },
+  [ConnectorId.Figma]: {},
 };
 
 /**

@@ -27,6 +27,7 @@ export const CONNECTOR_BRAND: Record<ConnectorId, BrandSlug> = {
   [ConnectorId.CloudWatchLogs]: 'cloudwatch',
   [ConnectorId.LokiLogs]: 'loki',
   [ConnectorId.NewRelicLogs]: 'newrelic',
+  [ConnectorId.Figma]: 'figma',
 };
 
 /** Words in an MCP Server's name or command that say whose it is; the first match wins. */
