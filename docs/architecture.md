@@ -88,6 +88,14 @@ Keychain, from `app/mcp-exec.js`, a bundle of the Keychain and the launcher alon
 and `google-mcp`, the Google bridge, from `app/google-mcp.js`, which holds no Keychain code and gets its Google client and
 refresh token as env vars through `mcp-exec`.
 
+A server started with `npx -y <package>@latest` runs from an immutable versioned install, not the shared `npx` cache:
+`mcp-packages/<package>/<version>/` in the data folder, built in a temporary sibling and renamed into place, with
+`current.json` naming the version a start uses (`mcp/npm-packages.ts`). `mcp-exec` and the Connection check both go
+through it, so a check starts what a run starts. A missing install is made under a lock folder shared by every
+process; `current.json` is refreshed at most once a day in the background, into a new folder, and the two newest
+versions stay. A failure there, or a start that dies in 10 seconds for a missing module, falls back to
+`npx` after removing the broken install. `uvx` and other commands start as before.
+
 On start the daemon takes the data folder lock, applies pending migrations in one transaction, runs
 start-up recovery, opens the port, starts the scheduler, opens the start-up queue and writes the runtime file. On stop it logs how long each
 provider's `onModuleDestroy` took; Probes and `claude` calls under way are aborted, and a registration or sign-in still
@@ -305,7 +313,7 @@ recovery to fail; the process ends after 20 seconds whatever is left. A run star
 Connection's; Verification the Connections and the log source server of its Alert (Datadog's for a Datadog Alert,
 CloudWatch's for a CloudWatch Alert, both when it has no Alert; a Loki Alert gets Grafana's, a New Relic Alert New Relic's, or on the key route the console's own `query_new_relic` tool, which the daemon runs with the key); Fix and the pull request jobs GitHub and Atlassian, and a Fix of a Loki or New Relic Alert its source's server,
 never CloudWatch's; the pull request text none. Of CloudWatch's tools a run may call only the four log tools. A server
-that starts goes through `mcp-exec`, which tells `npx` to use its cache before the registry, and the run waits up to 10
+that starts goes through `mcp-exec`, which runs an `npx` package from its installed version without asking the registry, and the run waits up to 10
 seconds for the servers it started. The code update (`refresh` on a Session kind) runs while the
 run starts and holds the run's first tool until it ends. The log line for each run says where the wait before the first token went.
 

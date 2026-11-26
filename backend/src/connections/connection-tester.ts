@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { getDefaultEnvironment, StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { type ConnectionTestResult, type ConnectionType, HealthStatus } from '@ops-console/shared';
-import { materialize } from '../mcp/launcher';
+import { materialize, packagesBase } from '../mcp/launcher';
+import { discardBroken, isModuleMissing, NpmPackages, type Prepared, QUICK_FAIL_MS } from '../mcp/npm-packages';
 import { type Launch, pingFor } from './launch';
 
 export const CONNECTION_TESTER = Symbol('CONNECTION_TESTER');
@@ -35,6 +36,7 @@ export class McpConnectionTester implements ConnectionTester {
   constructor(
     private readonly version: string,
     private readonly idleMs = POOL_IDLE_MS,
+    private readonly packages = new NpmPackages(packagesBase()),
   ) {}
 
   async run(type: ConnectionType, launch: Launch, pool?: string): Promise<ConnectionTestResult> {
@@ -86,19 +88,34 @@ export class McpConnectionTester implements ConnectionTester {
     this.kept.set(pool, kept);
   }
 
+  /** Starts the server and runs the read; a server that dies at start for a missing module is installed afresh once. */
   private async start(
     ping: { tool: string; args: Record<string, unknown> },
     launch: Launch,
     started: number,
     pooled?: { pool: string; hash: string },
   ): Promise<ConnectionTestResult> {
+    const first = await this.attempt(ping, launch, started, pooled);
+    if (!first.broken) return first.result;
+    await discardBroken(first.broken.prepared, first.broken.stderr);
+    return (await this.attempt(ping, launch, started, pooled)).result;
+  }
+
+  private async attempt(
+    ping: { tool: string; args: Record<string, unknown> },
+    launch: Launch,
+    started: number,
+    pooled?: { pool: string; hash: string },
+  ): Promise<{ result: ConnectionTestResult; broken?: { prepared: Prepared; stderr: string } }> {
+    const began = Date.now();
     const [command = '', ...args] = launch.target.split(' ');
     const ready = await materialize(launch.env, args);
+    const prepared = await this.packages.prepare(command, ready.args);
     const client = new Client({ name: 'ops-console', version: this.version });
     const timer = setTimeout(() => void client.close(), TIMEOUT_MS);
     const transport = new StdioClientTransport({
-      command,
-      args: ready.args,
+      command: prepared.command,
+      args: prepared.args,
       env: { ...getDefaultEnvironment(), ...QUIET_NPM, ...ready.env },
       stderr: 'pipe',
     });
@@ -116,15 +133,17 @@ export class McpConnectionTester implements ConnectionTester {
       const result = await client.callTool({ name: ping.tool, arguments: ping.args });
       const outcome = answer(result, launch, started);
       keepIt = pooled !== undefined && outcome.status === HealthStatus.Ok;
-      return outcome;
+      return { result: outcome };
     } catch (error) {
       // A server that exits at start only tells the client the connection closed; its stderr says why.
       const reason = stderr.split('\n').findLast((line) => /\berror\b/i.test(line) && !/^\s/.test(line));
-      return {
+      const result = {
         status: HealthStatus.Fail,
         latency_ms: null,
         detail: scrub(reason ?? String((error as Error).message ?? error), launch),
       };
+      const quick = Date.now() - began < QUICK_FAIL_MS && isModuleMissing(stderr);
+      return { result, broken: quick ? { prepared, stderr } : undefined };
     } finally {
       clearTimeout(timer);
       if (keepIt && pooled) {

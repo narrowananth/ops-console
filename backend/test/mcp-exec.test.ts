@@ -1,9 +1,11 @@
-import { readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { HANDOVER_FLAG } from '../src/keychain/handover';
 import { filesBase, launcherArgv, runMcpExec, unwrapLauncher } from '../src/mcp/launcher';
+import { NpmPackages } from '../src/mcp/npm-packages';
 import { FakeKeychain } from './fakes/keychain';
+import { fakeNpm } from './fakes/npm';
 import { tempDir } from './helpers';
 
 /** A command that writes its env var and arguments to a file, and prints nothing. */
@@ -117,5 +119,123 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ key: readFileSync(file, '
     const [command, args] = launcherArgv('/x/ops-console', 'pg', 'npx', ['-y', 'pg']);
     expect(unwrapLauncher('/x/ops-console', command, args)).toEqual({ name: 'pg', command: 'npx', args: ['-y', 'pg'] });
     expect(unwrapLauncher('/other', command, args)).toBeNull();
+  });
+});
+
+describe('ops-console mcp-exec of npx servers', () => {
+  const SPEC = ['npx', '-y', '@bytebase/dbhub@latest', '--transport', 'stdio'];
+  const flag = async () => path.join(await tempDir(), HANDOVER_FLAG);
+  /** A bin that records its arguments and the secret, after `before`. */
+  const recording = (out: string, before = '') =>
+    `${before}require('node:fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(2), secret: process.env.DSN ?? null }));`;
+
+  /** Puts a command on PATH that records its arguments, and returns where it writes them. */
+  async function onPath(name: string): Promise<{ out: string; restore: () => void }> {
+    const dir = await tempDir();
+    const out = path.join(dir, `${name}.json`);
+    const file = path.join(dir, name);
+    await writeFile(file, `#!/usr/bin/env node\n${recording(out)}\n`);
+    await chmod(file, 0o755);
+    const was = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${was}`;
+    return {
+      out,
+      restore: () => {
+        process.env.PATH = was;
+      },
+    };
+  }
+
+  it('starts the installed package, not npx, with the Keychain env and the arguments after the package', async () => {
+    const keychain = new FakeKeychain();
+    await keychain.set('mcp:pg', JSON.stringify({ DSN: 'postgres://u:hunter2-secret@db.example.com/x' }));
+    const out = path.join(await tempDir(), 'out.json');
+    const fake = fakeNpm({ script: () => recording(out) });
+    const packages = new NpmPackages(await tempDir(), { npm: fake.npm });
+
+    expect(await runMcpExec(['pg', '--', ...SPEC], keychain, await tempDir(), await flag(), packages)).toBe(0);
+    expect(JSON.parse(await readFile(out, 'utf8'))).toEqual({
+      args: ['--transport', 'stdio'],
+      secret: 'postgres://u:hunter2-secret@db.example.com/x',
+    });
+
+    await rm(out);
+    expect(await runMcpExec(['pg', '--', ...SPEC], keychain, await tempDir(), await flag(), packages)).toBe(0);
+    expect(fake.state.installs).toBe(1);
+  });
+
+  it('leaves uvx alone', async () => {
+    const fake = fakeNpm();
+    const uvx = await onPath('uvx');
+    try {
+      const packages = new NpmPackages(await tempDir(), { npm: fake.npm });
+      const argv = ['ch', '--', 'uvx', 'mcp-clickhouse'];
+      expect(await runMcpExec(argv, new FakeKeychain(), await tempDir(), await flag(), packages)).toBe(0);
+    } finally {
+      uvx.restore();
+    }
+    expect(JSON.parse(await readFile(uvx.out, 'utf8')).args).toEqual(['mcp-clickhouse']);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it('runs the same npx command as before when the install is not possible', async () => {
+    const npx = await onPath('npx');
+    try {
+      const packages = new NpmPackages(await tempDir(), { npm: fakeNpm({ missing: true }).npm });
+      expect(await runMcpExec(['pg', '--', ...SPEC], new FakeKeychain(), await tempDir(), await flag(), packages)).toBe(
+        0,
+      );
+    } finally {
+      npx.restore();
+    }
+    expect(JSON.parse(await readFile(npx.out, 'utf8')).args).toEqual(SPEC.slice(1));
+  });
+
+  /** A bin that dies on a missing module the first `failures` times it runs, then records. */
+  async function flaky(failures: number) {
+    const dir = await tempDir();
+    const out = path.join(dir, 'out.json');
+    const runs = path.join(dir, 'runs');
+    const failing = `const fs = require('node:fs'); fs.appendFileSync(${JSON.stringify(runs)}, 'x');
+if (fs.readFileSync(${JSON.stringify(runs)}, 'utf8').length <= ${failures}) { console.error("Error: Cannot find module 'iconv-lite'"); process.exit(1); }`;
+    const fake = fakeNpm({ script: () => recording(out, failing) });
+    const packages = new NpmPackages(await tempDir(), { npm: fake.npm });
+    return { out, fake, packages, runs: async () => (await readFile(runs, 'utf8').catch(() => '')).length };
+  }
+
+  it('installs again and starts once more when the server dies at start for a missing module', async () => {
+    const { out, fake, packages, runs } = await flaky(1);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const code = await runMcpExec(['pg', '--', ...SPEC], new FakeKeychain(), await tempDir(), await flag(), packages);
+    const printed = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+    stderr.mockRestore();
+
+    expect(code).toBe(0);
+    expect(await runs()).toBe(2);
+    expect(fake.state.installs).toBe(2);
+    expect(JSON.parse(await readFile(out, 'utf8')).args).toEqual(['--transport', 'stdio']);
+    expect(printed).toContain("Cannot find module 'iconv-lite'");
+  });
+
+  it('retries only once', async () => {
+    const { fake, packages, runs } = await flaky(5);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const code = await runMcpExec(['pg', '--', ...SPEC], new FakeKeychain(), await tempDir(), await flag(), packages);
+    stderr.mockRestore();
+    expect(code).toBe(1);
+    expect(await runs()).toBe(2);
+    expect(fake.state.installs).toBe(2);
+  });
+
+  it('does not retry a server that fails for another reason', async () => {
+    const fake = fakeNpm({
+      script: () => "console.error('Fatal error: password authentication failed'); process.exit(1);",
+    });
+    const packages = new NpmPackages(await tempDir(), { npm: fake.npm });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const code = await runMcpExec(['pg', '--', ...SPEC], new FakeKeychain(), await tempDir(), await flag(), packages);
+    stderr.mockRestore();
+    expect(code).toBe(1);
+    expect(fake.state.installs).toBe(1);
   });
 });

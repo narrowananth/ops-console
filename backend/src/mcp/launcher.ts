@@ -5,6 +5,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { HANDOVER_FLAG, waitForHandover } from '../keychain/handover';
 import { HANDOVER_LIMIT_MS, type Keychain } from '../keychain/keychain';
+import { discardBroken, isModuleMissing, NpmPackages, type Prepared, QUICK_FAIL_MS } from './npm-packages';
 
 /** The Keychain key holding a server's env vars, as one JSON object. */
 export const secretsKey = (server: string) => `mcp:${server}`;
@@ -49,6 +50,11 @@ function dataDir(): string {
  */
 export function filesBase(): string {
   return path.join(dataDir(), 'mcp-files');
+}
+
+/** Where the npm packages MCP servers start from are installed, one folder per package and version. */
+export function packagesBase(): string {
+  return path.join(dataDir(), 'mcp-packages');
 }
 
 /** The file that exists while a start moves the Keychain items to its app. */
@@ -107,13 +113,16 @@ export function unwrapLauncher(
  * `ops-console mcp-exec <name> -- <command> [args]`: starts the command with the server's env vars from the
  * Keychain, so secrets reach that process and nothing else. Prints nothing: stdout belongs to the MCP protocol.
  * While a start moves the Keychain items it waits for that, since an item the old app still holds would ask for the
- * password and one in between would read as missing. Resolves with the exit code.
+ * password and one in between would read as missing. An `npx -y <package>@latest` command runs the package from its
+ * installed version (`npm-packages.ts`). A server that dies within seconds for a missing module has that install
+ * removed and is started once more. Resolves with the exit code.
  */
 export async function runMcpExec(
   argv: string[],
   keychain: Keychain,
   base: string = filesBase(),
   flag: string = handoverFlag(),
+  packages: NpmPackages = new NpmPackages(packagesBase()),
 ): Promise<number> {
   const dash = argv.indexOf('--');
   const name = argv[0];
@@ -122,15 +131,39 @@ export async function runMcpExec(
   await waitForHandover(flag, HANDOVER_LIMIT_MS);
   const stored = await keychain.get(secretsKey(name));
   const ready = await materialize(stored === null ? {} : parseEnv(stored), argv.slice(dash + 2), base);
-  // Every run starts every Connection's server through `npx …@latest`; asking the npm registry each time costs CPU and
-  // a round trip per server. Cached packages are used as they are, and a missing one is still fetched.
+  // Every run starts every Connection's server; asking the npm registry each time costs CPU and a round trip per
+  // server. Cached packages are used as they are, and a missing one is still fetched.
   const quiet = { npm_config_prefer_offline: 'true', npm_config_update_notifier: 'false', npm_config_fund: 'false' };
-  const child = spawn(command, ready.args, { stdio: 'inherit', env: { ...quiet, ...process.env, ...ready.env } });
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => child.kill(signal));
+  const env = { ...quiet, ...process.env, ...ready.env };
+  let prepared = await packages.prepare(command, ready.args);
+  let result = await start(prepared, env);
+  if (result.code !== 0 && result.ms < QUICK_FAIL_MS && isModuleMissing(result.stderr)) {
+    await discardBroken(prepared, result.stderr);
+    prepared = await packages.prepare(command, ready.args);
+    result = await start(prepared, env);
+  }
+  await ready.cleanup();
+  return result.code;
+}
+
+/** Runs one start with stdin and stdout shared, since the MCP protocol runs on them; stderr is passed on and kept. */
+async function start(
+  { command, args }: Prepared,
+  env: NodeJS.ProcessEnv,
+): Promise<{ code: number; stderr: string; ms: number }> {
+  const began = Date.now();
+  const child = spawn(command, args, { stdio: ['inherit', 'inherit', 'pipe'], env });
+  let stderr = '';
+  child.stderr.on('data', (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    stderr = (stderr + chunk.toString()).slice(-20_000);
+  });
+  const forward = (signal: NodeJS.Signals) => child.kill(signal);
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, forward);
   const code = await new Promise<number>((resolve) => {
     child.once('error', () => resolve(127));
     child.once('close', (exit, signal) => resolve(exit ?? (signal ? 128 : 1)));
   });
-  await ready.cleanup();
-  return code;
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) process.off(signal, forward);
+  return { code, stderr, ms: Date.now() - began };
 }
