@@ -176,7 +176,7 @@ test('a Session that is sent from loses its Draft badge', async ({ page }) => {
   await routeList(page, [session('s1'), session('s2')]);
   await page.route('**/api/sessions/s1/messages', (route) =>
     route.request().method() === 'POST'
-      ? route.fulfill({ status: 202, json: { data: said('u1', 'user', 'go') } })
+      ? route.fulfill({ status: 202, json: { data: { message_id: 'm1' } } })
       : route.fallback(),
   );
   await open(page, '/sessions?session=s1');
@@ -184,7 +184,10 @@ test('a Session that is sent from loses its Draft badge', async ({ page }) => {
   await row(page, 'Session s2').getByRole('button').click();
   await expect(row(page, 'Session s1').getByText('Draft')).toBeVisible();
   await row(page, 'Session s1').getByRole('button').click();
+  // Leave only once the send has been answered, so the Session is left after a finished send on a fast or a slow runner.
+  const answered = page.waitForResponse((response) => response.request().method() === 'POST');
   await page.getByRole('button', { name: 'Send' }).click();
+  await answered;
   await row(page, 'Session s2').getByRole('button').click();
   await expect(row(page, 'Session s1').getByText('Draft')).toHaveCount(0);
 });
