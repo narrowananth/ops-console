@@ -12,6 +12,8 @@ type ReadList = {
   alias: RegExp;
   reads: string[];
   writes: string[];
+  /** What the agent does when the vendor refuses a call, told with the note. */
+  onRefusal?: string;
 };
 
 const serverOf = (id: ConnectorId): string => (CONNECTOR_SERVERS[id] as { name: string }).name;
@@ -59,6 +61,8 @@ const READ_LISTS: Record<string, ReadList> = {
       'create_shader',
       'update_shader',
     ],
+    onRefusal:
+      'If Figma refuses a call (no edit access, a plan or seat without access, a rate limit), call mcp__figma__whoami once and tell the operator the account, plan, tier and seat it reports, and that Starter plans get no calls and View and Collab seats 20 a month. Do not retry the refused call.',
   },
 };
 
@@ -86,7 +90,7 @@ export function readListRefusals(): string[] {
 /** What the agent is told about a server with a Read list. */
 export function readListNote(server: string): string {
   const list = READ_LISTS[server] as ReadList;
-  return `${list.service} is read only here. Read it with ${list.reads.map((tool) => full(server, tool)).join(', ')}. Any other ${list.service} tool is refused and changes nothing.`;
+  return `${list.service} is read only here. Read it with ${list.reads.map((tool) => full(server, tool)).join(', ')}. Any other ${list.service} tool is refused and changes nothing.${list.onRefusal ? ` ${list.onRefusal}` : ''}`;
 }
 
 /** The servers with a Read list. */
