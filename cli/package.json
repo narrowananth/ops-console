@@ -1,6 +1,6 @@
 {
   "name": "@ops-console/cli",
-  "version": "0.1.74",
+  "version": "0.1.75",
   "private": true,
   "type": "module",
   "scripts": {
