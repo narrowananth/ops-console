@@ -136,7 +136,7 @@ export function SessionView({ id, onGone }: { id: string; onGone: () => void }) 
   useEffect(() => {
     const { before, opened } = auto.current;
     if (!serverList || before === null) return;
-    const fresh = freshServers(serverList, before, opened);
+    const fresh = freshServers(serverList, before, opened, processList ?? []);
     for (const server of fresh) opened.add(server.port);
     if (fresh[0]) openInBrowser(serverAddress(fresh[0].port));
   }, [serverList]);

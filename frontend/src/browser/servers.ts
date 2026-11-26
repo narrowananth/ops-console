@@ -1,4 +1,4 @@
-import type { LocalServer, SessionProcess } from '@ops-console/shared';
+import { type LocalServer, type SessionProcess, TabOpener } from '@ops-console/shared';
 import { ascending } from '../lib/sort';
 
 /** A server with the tag the Local servers list shows beside it. */
@@ -20,15 +20,23 @@ export function sessionPort(servers: readonly LocalServer[]): number | null {
 
 /**
  * The servers a Session process started since the view opened, not yet opened in a page: `before` holds the processes
- * that were already there, `opened` the ports a page was opened for.
+ * that were already there, `opened` the ports a page was opened for. A process the agent started opens no page by
+ * itself: the agent opens the one it wants seen, and a test run's server on a port of its own would only leave a tab
+ * with a sign-in or a dead address.
  */
 export function freshServers(
   servers: readonly LocalServer[],
   before: ReadonlySet<string>,
   opened: ReadonlySet<number>,
+  processes: readonly Pick<SessionProcess, 'id' | 'started_by'>[],
 ): LocalServer[] {
+  const byAgent = new Set(processes.filter((one) => one.started_by === TabOpener.Agent).map((one) => one.id));
   return servers.filter(
-    (server) => server.process_id !== null && !before.has(server.process_id) && !opened.has(server.port),
+    (server) =>
+      server.process_id !== null &&
+      !before.has(server.process_id) &&
+      !byAgent.has(server.process_id) &&
+      !opened.has(server.port),
   );
 }
 
