@@ -4,15 +4,17 @@ import path from 'node:path';
 import { ConnectionEnv, PrAction, RunPurpose, SessionKind } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConnectionScopes, scopedConnections } from '../src/agent/connection-scopes';
 import { AgentRuntime } from '../src/agent/runtime';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { ConnectorsModule } from '../src/connectors/connectors.module';
-import { connections, sessionConnections, sessions } from '../src/db/schema';
+import { actionLog, connections, repos, sessionConnections, sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { DevtoolsModule } from '../src/devtools/devtools.module';
 import { McpServersModule } from '../src/mcp/mcp-servers.module';
 import { ReposModule } from '../src/repos/repos.module';
 import { WorkspaceModule } from '../src/workspace/workspace.module';
+import { WorkspaceSessionsService } from '../src/workspace/workspace-sessions.service';
 import { type AgentDaemon, api, listen, startAgentDaemon, until } from './agent-fixtures';
 import { FakeConnectionTester } from './fakes/connection-tester';
 import { FakeConnectorTools } from './fakes/connector-tools';
@@ -85,6 +87,10 @@ const denied = (daemon: AgentDaemon, call = -1) =>
     ?.map((server) => server.serverName)
     .sort();
 
+const repoDir = (daemon: AgentDaemon, repoId: string): string =>
+  daemon.app.get<Store>(STORE).db.select({ path: repos.path }).from(repos).where(eq(repos.id, repoId)).get()?.path ??
+  '';
+
 const append = (daemon: AgentDaemon): string =>
   (daemon.sdk.calls.at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
 
@@ -104,8 +110,8 @@ async function ask(daemon: AgentDaemon, sessionId: string, ...steps: Parameters<
   );
 }
 
-/** Imports a Repo with one commit on `main`; returns its id. */
-async function importRepo(daemon: AgentDaemon): Promise<string> {
+/** Imports a Repo with one commit on `main`, and an untracked `.env` when `env` is given; returns its id. */
+async function importRepo(daemon: AgentDaemon, env?: string): Promise<string> {
   const dir = path.join(await realpath(await tempDir('ops-console-git-')), 'orders-api');
   await mkdir(dir, { recursive: true });
   const git = (...args: string[]) =>
@@ -115,6 +121,7 @@ async function importRepo(daemon: AgentDaemon): Promise<string> {
   git('add', '.');
   git('commit', '-q', '-m', 'first');
   git('remote', 'add', 'origin', 'git@github.com:acme/orders-api.git');
+  if (env !== undefined) await writeFile(path.join(dir, '.env'), env);
   return (await api(daemon).post('/repos', { path: dir })).body.data.id as string;
 }
 
@@ -197,9 +204,12 @@ describe('scope API', () => {
     const daemon = await start();
     await connect(daemon, MONGO_PROD);
     await connect(daemon, PG_STAGING);
-    const made = await newSession(daemon, { kind: 'devtools' });
-    await ask(daemon, made.id, { text: 'ok' });
+    const made = daemon.createSession({ kind: SessionKind.Devtools });
+    await ask(daemon, made, { text: 'ok' });
     expect(denied(daemon)).toEqual([]);
+    expect(append(daemon)).toContain('ops-compare');
+    const refused = await api(daemon).post('/sessions', { kind: 'devtools' });
+    expect([refused.status, refused.body.error.code]).toEqual([400, 'validation_failed']);
   });
 
   it('gives a Fork the source scope', async () => {
@@ -239,27 +249,191 @@ describe('a repo Session', () => {
   });
 });
 
-describe('a PR Session', () => {
-  it('has no Connection scope: its runs reach no Connection, get no note, and refuse PATCH connection_ids', async () => {
+const PG_PROD = {
+  name: 'pg-prod',
+  type: 'postgres',
+  env: 'prod',
+  config: { host: 'db.prod.example.com', port: 5432, database: 'orders', user: 'reader' },
+  secret: 'hunter3',
+};
+const PG_LOCAL = {
+  name: 'pg-local',
+  type: 'postgres',
+  env: 'local',
+  config: { host: 'localhost', port: 5433, database: 'ledger', user: 'dev' },
+  secret: 'dev',
+};
+const PG_OTHER = { ...PG_STAGING, name: 'pg-other', config: { ...PG_STAGING.config, host: 'db.other.example.com' } };
+const PG_WRITER = { ...PG_STAGING, name: 'pg-writer', env: 'dev', access: 'write' };
+/** Names pg-staging and pg-writer by host, pg-prod by host, pg-local by port and database; nothing else. */
+const REPO_ENV = [
+  'DATABASE_URL=postgres://reader:SECRET-pw-123@db.example.com:5432/orders',
+  'REPORTS_URL=postgres://reader:SECRET-pw-456@db.prod.example.com:5432/orders',
+  'LEDGER_URL=postgres://dev:SECRET-pw-789@localhost:5433/ledger',
+  'REDIS_PORT=6379',
+  '',
+].join('\n');
+
+async function connectAll(daemon: AgentDaemon) {
+  const made: Record<string, Made> = {};
+  for (const body of [MONGO_PROD, PG_STAGING, PG_WRITER, PG_PROD, PG_LOCAL, PG_OTHER, REDIS_LOCAL]) {
+    made[body.name] = await connect(daemon, body);
+  }
+  return made as Record<string, Made>;
+}
+
+describe('Connections the Repo names', () => {
+  it('ticks the read Connections its .env names when a repo Session is made, and not for an anonymous Session', async () => {
     const daemon = await start();
-    const mongo = await connect(daemon, MONGO_PROD);
-    await connect(daemon, PG_STAGING);
+    const all = await connectAll(daemon);
+    const repo = await importRepo(daemon, REPO_ENV);
+    const created = await api(daemon).post('/sessions', { repo_id: repo, branch: 'main', access_mode: 'full' });
+    expect(created.status).toBe(201);
+    // The write, none-named and unnamed Connections are not ticked; the PROD one with read is.
+    expect([...created.body.data.connection_ids].sort()).toEqual(
+      [all['pg-staging']?.id, all['pg-prod']?.id, all['pg-local']?.id].sort(),
+    );
+    expect((await newSession(daemon)).connection_ids).toEqual([]);
+
+    const id = created.body.data.id as string;
+    await ask(daemon, id, { text: 'one' });
+    expect(denied(daemon)).toEqual(['mongo-prod', 'pg-other', 'pg-writer', 'redis-local']);
+    expect(append(daemon)).toContain('pg-staging (read-only)');
+    expect(append(daemon)).toContain('pg-prod (read-only) PROD');
+    // Names leave the daemon; the file's text and its passwords do not.
+    const everywhere = JSON.stringify([
+      append(daemon),
+      (await api(daemon).get(`/sessions/${id}/messages`)).body.data,
+      (await api(daemon).get('/action-log')).body.data,
+      daemon.app.get<Store>(STORE).db.select().from(actionLog).all(),
+      created.body.data,
+    ]);
+    expect(everywhere).not.toContain('SECRET-pw');
+    expect(everywhere).not.toContain('DATABASE_URL');
+  });
+
+  it("keeps the operator's later ticks, and does not match again when a Connection or the .env changes", async () => {
+    const daemon = await start();
+    const all = await connectAll(daemon);
+    const repo = await importRepo(daemon, REPO_ENV);
+    const created = await api(daemon).post('/sessions', { repo_id: repo, branch: 'main', access_mode: 'full' });
+    const id = created.body.data.id as string;
+    const untick = await api(daemon).patch(`/sessions/${id}`, { connection_ids: [all['pg-staging']?.id] });
+    expect(untick.body.data.connection_ids).toEqual([all['pg-staging']?.id]);
+    await connect(daemon, { ...PG_STAGING, name: 'pg-late' });
+    await writeFile(path.join(repoDir(daemon, repo), '.env'), `${REPO_ENV}OTHER=db.other.example.com\n`);
+    await ask(daemon, id, { text: 'two' });
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.connection_ids).toEqual([all['pg-staging']?.id]);
+    expect(denied(daemon)).toEqual([
+      'mongo-prod',
+      'pg-late',
+      'pg-local',
+      'pg-other',
+      'pg-prod',
+      'pg-writer',
+      'redis-local',
+    ]);
+    await api(daemon).patch(`/sessions/${id}`, { connection_ids: [] });
+    expect((await api(daemon).get(`/sessions/${id}`)).body.data.connection_ids).toEqual([]);
+  });
+
+  it('ticks nothing, and still makes the Session, when the Repo has no .env', async () => {
+    const daemon = await start();
+    await connectAll(daemon);
     const repo = await importRepo(daemon);
+    const created = await api(daemon).post('/sessions', { repo_id: repo, branch: 'main', access_mode: 'full' });
+    expect([created.status, created.body.data.connection_ids]).toEqual([201, []]);
+  });
+});
+
+describe('a PR Session', () => {
+  async function prSession(daemon: AgentDaemon, repo: string): Promise<string> {
     const made = await api(daemon).post('/sessions', { repo_id: repo, branch: 'main', access_mode: 'full' });
     const id = made.body.data.id as string;
-    // A scope ticked before the Session became a PR Session's, or by any other route than the API.
-    const store = daemon.app.get<Store>(STORE);
-    store.write((tx) => {
-      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, id)).run();
-      tx.insert(sessionConnections).values({ sessionId: id, connectionId: mongo.id }).run();
-    });
+    daemon.app
+      .get<Store>(STORE)
+      .write((tx) => tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, id)).run());
+    return id;
+  }
+
+  it("reaches, at each run, the read Connections its Repo's own .env names, with the note, and refuses PATCH", async () => {
+    const daemon = await start();
+    const all = await connectAll(daemon);
+    const repo = await importRepo(daemon);
+    const id = await prSession(daemon, repo);
+
+    // No .env yet: nothing is reached, as before.
     await ask(daemon, id, { text: 'ok' });
-    // Every Connection, and the Connector servers with a Read list (Figma), stay out of a pull request's Session.
-    expect(denied(daemon)).toEqual(['figma', 'mongo-prod', 'pg-staging']);
+    expect(denied(daemon)).toEqual(['figma', ...Object.keys(all)].sort());
     expect(append(daemon)).not.toContain('ops-result');
+
+    // The Repo's file now names some: the next run reaches exactly those, found again, none stored.
+    await writeFile(path.join(repoDir(daemon, repo), '.env'), REPO_ENV);
+    await ask(daemon, id, { text: 'ok' });
+    expect(denied(daemon)).toEqual(['figma', 'mongo-prod', 'pg-other', 'pg-prod', 'pg-writer', 'redis-local']);
+    expect(append(daemon)).toContain('pg-staging (read-only)');
+    expect(append(daemon)).toContain('ops-result');
     expect(append(daemon)).not.toContain('mongo-prod');
-    const patched = await api(daemon).patch(`/sessions/${id}`, { connection_ids: [mongo.id] });
+    expect(append(daemon)).not.toContain('SECRET-pw');
+    expect(daemon.app.get<Store>(STORE).db.select().from(sessionConnections).all()).toEqual([]);
+
+    // A file the pull request's branch holds in the Session's worktree chooses nothing.
+    const worktree = daemon.app.get(WorkspaceSessionsService).worktreeDir(id);
+    await writeFile(path.join(worktree, '.env'), 'X=db.other.example.com\n');
+    await ask(daemon, id, { text: 'ok' });
+    expect(denied(daemon)).toContain('pg-other');
+
+    const patched = await api(daemon).patch(`/sessions/${id}`, { connection_ids: [all['pg-staging']?.id] });
     expect([patched.status, patched.body.error.code]).toEqual([400, 'validation_failed']);
+
+    // The Repo's file changed: the next run follows it.
+    await writeFile(path.join(repoDir(daemon, repo), '.env'), 'NOTHING=1\n');
+    await ask(daemon, id, { text: 'ok' });
+    expect(denied(daemon)).toEqual(['figma', ...Object.keys(all)].sort());
+  });
+
+  it('shows the Connections it reaches as its connection_ids', async () => {
+    const daemon = await start();
+    const all = await connectAll(daemon);
+    const repo = await importRepo(daemon, REPO_ENV);
+    const id = await prSession(daemon, repo);
+    const seen = (await api(daemon).get(`/sessions/${id}`)).body.data.connection_ids as string[];
+    // The PROD Connection the file names is left out: a PR Session reads text the operator did not write.
+    expect([...seen].sort()).toEqual([all['pg-staging']?.id, all['pg-local']?.id].sort());
+  });
+
+  it('never reaches a PROD Connection, even with Access Level read, and the note names only the others', async () => {
+    const daemon = await start();
+    await connectAll(daemon);
+    const repo = await importRepo(daemon, REPO_ENV);
+    const id = await prSession(daemon, repo);
+    await ask(daemon, id, { text: 'ok' });
+    expect(denied(daemon)).toContain('pg-prod');
+    expect(append(daemon)).toContain('pg-staging (read-only)');
+    expect(append(daemon)).not.toContain('pg-prod');
+  });
+
+  it('does the match once for the views of a Sessions list within 5 seconds, and again after', async () => {
+    const daemon = await start();
+    const all = await connectAll(daemon);
+    const repo = await importRepo(daemon, REPO_ENV);
+    const id = await prSession(daemon, repo);
+    const store = daemon.app.get<Store>(STORE);
+    const row = store.db.select().from(sessions).where(eq(sessions.id, id)).get();
+    if (!row) throw new Error('no session');
+    let now = 1_000_000;
+    const handler = scopedConnections(new ConnectionScopes(store, () => now), 'none');
+    const view = (): string[] =>
+      [...((handler.view?.(row) ?? { connection_ids: [] }).connection_ids as string[])].sort();
+    const first = [all['pg-staging']?.id, all['pg-local']?.id].sort();
+    expect(view()).toEqual(first);
+    // A change inside the 5 seconds is not seen: no folder work was done for the second view.
+    await writeFile(path.join(repoDir(daemon, repo), '.env'), 'NOTHING=1\n');
+    expect(view()).toEqual(first);
+    now += 4_999;
+    expect(view()).toEqual(first);
+    now += 2;
+    expect(view()).toEqual([]);
   });
 });
 
@@ -286,6 +460,8 @@ describe('run options', () => {
     expect(append(daemon)).not.toContain('mongo-prod');
     expect(append(daemon)).toMatch(/only read unless the operator asks/i);
     expect(append(daemon)).toContain('ops-result');
+    expect(append(daemon)).toContain('ops-compare');
+    expect(append(daemon)).toContain('rows across');
     expect(append(daemon)).toContain('output folder');
 
     await api(daemon).patch(`/sessions/${session.id}`, { connection_ids: [mongo.id] });

@@ -34,7 +34,8 @@ pastes the findings into a new prompt.
    `connection_no_access`. A refused change leaves the scope as it was.
 9. A Fork of a Session carries its scope. A Spawned Session starts with an empty one.
 10. A job the console starts (Verify, Fix, a pull request review or reply, Open pull request) ignores the Session's scope
-    and keeps its own rules (`agent-playbooks`). The operator's messages in an Alert's Session use the scope.
+    and keeps its own rules (`agent-playbooks`). The operator's messages in an Alert's Session use the scope. A PR Session has no
+    scope: its runs reach the non-PROD read Connections its Repo's `.env` names ([devtools-into-sessions](devtools-into-sessions.md)).
 11. A Dev tools Session behaves as before, including that an empty scope there means every Connection with access.
 12. Two Sessions with different scopes run side by side, each reaching only its own.
 
@@ -46,12 +47,13 @@ pastes the findings into a new prompt.
 - **Same rules**: Access Levels, the PROD-write Approval, the Action Log and the read-only launch are Dev tools' own
   (`09-dev-tools-agent`), not copied.
 - **Only the operator's messages**: a console-started job's reach is chosen by its purpose, not by the Session.
+- **PR Session**: no scope of its own. It reaches the non-PROD read Connections its Repo's own `.env` names, found at each run
+  ([devtools-into-sessions](devtools-into-sessions.md)); it refuses `PATCH` of `connection_ids`.
 
 ## Not required
 
 - **A Connections default for new Sessions.** Each Session starts with none ticked.
-- **Dev tools merging into Sessions.** The Dev tools page stays for Comparison and multi-Connection questions.
-- **Scope on a PR Session** (no composer), and on a Spawned Session.
+- **A scope the operator edits on a PR Session** (no composer), and on a Spawned Session. A PR Session's reach comes from its Repo's `.env` ([devtools-into-sessions](devtools-into-sessions.md)).
 
 ## Safety
 
@@ -111,4 +113,4 @@ Applies to the next run and sends `session.updated`.
 
 ## Out of scope
 
-- Merging Dev tools into Sessions, a default scope, scope for jobs.
+- A default scope, scope for jobs.

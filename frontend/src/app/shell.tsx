@@ -23,7 +23,6 @@ const AgentRunsActions = load(() => import('../agent-runs/agent-runs-view'), 'Ag
 const AgentRunsView = load(() => import('../agent-runs/agent-runs-view'), 'AgentRunsView');
 const AgentsTab = load(() => import('../agents/agents-tab'), 'AgentsTab');
 const DevToolsTab = load(() => import('../devtools/devtools-tab'), 'DevToolsTab');
-const DevToolsView = load(() => import('../devtools/terminal-view'), 'DevToolsView');
 const IntegrationsTab = load(() => import('../integrations/integrations-tab'), 'IntegrationsTab');
 const MonitorView = load(() => import('../monitor/monitor-view'), 'MonitorView');
 const NewPlaybookButton = load(() => import('../playbooks/playbooks-view'), 'NewPlaybookButton');
@@ -121,16 +120,7 @@ export function Shell() {
                 </Page>
               }
             />
-            <Route
-              path="/devtools"
-              element={
-                <Page title="Dev tools" sub="Ask across your databases. PROD is read-only unless you allow write.">
-                  <Loading>
-                    <DevToolsView />
-                  </Loading>
-                </Page>
-              }
-            />
+            <Route path="/devtools" element={<Navigate to="/sessions" replace />} />
             <Route
               path="/integrations"
               element={

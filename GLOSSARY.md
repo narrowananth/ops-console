@@ -423,7 +423,7 @@ with. Each finding is posted to the Git host on its line, and the verdict and re
 it stale. The operator may add a **Review note** when starting it: free text the agent reads with the pull request, such
 as where to look or a related pull request to read first. The note narrows the review; the Playbook's checks stay.
 
-### Dev tools
+### Connections
 
 **Connection**:
 A database or stream the agent may use, with an Environment and an Access Level.
@@ -439,7 +439,7 @@ reads it: a PROD Connection is never given write access.
 
 **MCP Server**:
 A server registered in Claude Code that gives the agent tools (Slack, Atlassian, a database). The
-console registers it in every Claude account. It exposes tools; it does not sign anyone in. Integrations lists them beside the Connectors; a Connector or Dev tools adds them.
+console registers it in every Claude account. It exposes tools; it does not sign anyone in. Integrations lists them beside the Connectors; a Connector or a Connection adds them.
 
 **Probe**:
 A short Agent SDK session that reads which MCP Servers connect and which tools they give, then
@@ -456,10 +456,12 @@ The stdio MCP Server the console registers for a Google Connector. It keeps noth
 
 **Connection scope**:
 The Connections a Session's runs may reach. Empty reaches none in a `repo` or `anonymous` Session and every Connection with
-access in a Dev tools one. The operator ticks them in the composer; the agent cannot change it.
+access in an earlier Dev tools one. The operator ticks them in the composer, and the console ticks the read ones the Repo's own
+`.env` names when a `repo` Session is made. A PR Session has no scope: each run reaches the non-PROD read Connections its Repo's untracked `.env`
+names. The agent cannot change it.
 
 **Result**:
-The rows one Connection gave for one Dev tools question, shown as a table under the Connection's name.
+The rows one Connection gave for one question about data, shown as a table under the Connection's name in the Session.
 
 **Comparison**:
 The agent's match of Results from two or more Connections on one key: one row per field, with the

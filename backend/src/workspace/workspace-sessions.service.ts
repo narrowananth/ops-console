@@ -100,8 +100,8 @@ export class WorkspaceSessionsService {
   }
 
   async create(input: CreateRepoSession): Promise<Session> {
-    const ids = [...new Set(input.connection_ids)];
-    this.scopes.check(ids);
+    const picked = [...new Set(input.connection_ids)];
+    this.scopes.check(picked);
     const folder = this.folder(input.repo_id);
     const branches = await this.git.branches(folder);
     if (!branches.some((branch) => branch.name === input.branch)) {
@@ -136,7 +136,8 @@ export class WorkspaceSessionsService {
       effort: input.effort,
       access_mode: input.access_mode,
     });
-    this.scopes.set(row.id, ids);
+    // The Connections the Repo's own `.env` names are ticked once, so the operator's later ticks stand.
+    this.scopes.set(row.id, [...new Set([...picked, ...this.scopes.named(input.repo_id)])]);
     // The worktree starts from the default branch as last fetched, so the Session opens at once; the newest commits
     // follow in the background and, at the latest, before the first run's first tool (`refreshDefault`).
     try {

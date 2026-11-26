@@ -97,7 +97,9 @@ async function open(page: Page, { session = {}, list = [], merged = [], closed =
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
   await page.route(/\/api\/sessions(\?.*)?$/, (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind');
-    return route.fulfill({ json: { data: kind === 'anonymous' ? [] : [{ ...SESSION, ...session }] } });
+    return route.fulfill({
+      json: { data: kind === 'anonymous' || kind === 'devtools' ? [] : [{ ...SESSION, ...session }] },
+    });
   });
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: [] } }));
   await page.route(/\/api\/pull-requests\?/, (route) => {

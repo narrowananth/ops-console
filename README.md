@@ -22,8 +22,9 @@ diagrams: [docs/architecture.md](docs/architecture.md), with the drawings in [do
   check and merge checks. Review with agent, Check replies and Address comments each open a Session on a pull request.
 - **Browser panel and Terminals.** A Session has a Chrome page you and the agent both drive, with Chrome's DevTools,
   element pick and Local servers, and a Terminals dock for shells and long-running processes.
-- **Dev tools.** Ask a question in plain words and have the agent query your databases, scoped to the Connections you
-  choose, with Results and a Comparison.
+- **Connections in a Session.** Ask a question in plain words and have the agent query your databases. You tick the
+  Connections in the composer, and the read-only ones your Repo's `.env` names are ticked for you. Answers come back as
+  Results and a Comparison.
 - **Playbooks and Skills.** Write the rules and steps the agent follows for each Trigger, copy and edit the built-in
   ones, and attach Skills: built-in packs, your own, or a Repo's.
 - **Integrations, Connections and MCP Servers.** Sixteen Connectors sign in once (Datadog, Jira, GitHub, GitLab,

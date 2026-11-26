@@ -39,7 +39,7 @@ const SESSION = {
   branch: null,
   pr_number: null,
   pr_action: null,
-  connection_ids: [],
+  connection_ids: ['c1', 'c2'],
   extra_repo_ids: [],
   pull_request: null,
   pull_requests: [],
@@ -98,92 +98,72 @@ const MESSAGES = [
   },
 ];
 
-async function mock(page: Page, sessions: unknown[]) {
+/** The daemon as an earlier Dev tools Session sees it: listed under its kind, empty under the others. */
+async function mock(page: Page) {
+  const patches: unknown[] = [];
   await page.route('**/api/connections', (route) =>
     route.fulfill({ json: { data: CONNECTIONS, meta: { next_cursor: null } } }),
   );
-  await page.route(/\/api\/sessions\?kind=devtools/, (route) => route.fulfill({ json: { data: sessions } }));
+  await page.route('**/api/repos', (route) => route.fulfill({ json: { data: [], meta: { next_cursor: null } } }));
+  await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
+  await page.route(/\/api\/sessions(\?.*)?$/, (route) => {
+    const kind = new URL(route.request().url()).searchParams.get('kind');
+    return route.fulfill({ json: { data: kind === 'devtools' ? [SESSION] : [] } });
+  });
   await page.route('**/api/sessions/s1/messages', (route) => route.fulfill({ json: { data: MESSAGES } }));
+  await page.route(/\/api\/sessions\/s1$/, (route) => {
+    if (route.request().method() !== 'PATCH') return route.fulfill({ json: { data: SESSION } });
+    patches.push(route.request().postDataJSON());
+    return route.fulfill({ json: { data: { ...SESSION, connection_ids: ['c1'] } } });
+  });
+  return patches;
 }
 
-test('Dev tools opens ready to ask, with the Synced dev tools list and the prompt', async ({ page }) => {
-  await mock(page, []);
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
+test('the sidebar has no Dev tools, and /devtools, with any query, lands on Sessions', async ({ page }) => {
+  await mock(page);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Dev tools' })).toHaveCount(0);
 
-  const tools = page.getByRole('complementary', { name: 'Synced dev tools' });
-  await expect(tools.getByRole('button', { name: /All connected/ })).toHaveAttribute('aria-pressed', 'true');
-  await expect(tools.getByRole('button', { name: /All connected/ })).toContainText('2');
-  await expect(tools.getByRole('button', { name: /mongo-prod/ })).toContainText('PROD');
-  await expect(tools.getByRole('button', { name: /redis-local/ })).toBeDisabled();
-  await expect(page.getByText('scope: all connected (2)')).toBeVisible();
-  await expect(page.getByRole('textbox', { name: 'Ask the agent' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Open terminal' })).toHaveCount(0);
-
-  await tools.getByRole('button', { name: /pg-tenant/ }).click();
-  await expect(page.getByText('scope: pg-tenant')).toBeVisible();
+  await page.goto(`${daemon.url}/devtools?x=1`);
+  await expect(page).toHaveURL(/\/sessions$/);
+  await expect(page.getByRole('heading', { name: 'Sessions' }).first()).toBeVisible();
 });
 
-test('a new terminal has its Model, Effort and Access chips, and its first question makes the Session with them', async ({
-  page,
-}) => {
-  await mock(page, [SESSION]);
-  let created: unknown;
-  await page.route('**/api/sessions', (route) => {
-    created = route.request().postDataJSON();
-    return route.fulfill({ status: 201, json: { data: { ...SESSION, id: 's2', title: 'New session' } } });
+test('a saved /devtools address does not bring the removed page back', async ({ page }) => {
+  await mock(page);
+  await page.goto(`${daemon.url}/sessions#token=${daemon.token}`);
+  await page.evaluate(() => {
+    localStorage.setItem('ops-console:nav.page', JSON.stringify('/devtools'));
+    localStorage.setItem('ops-console:nav.last./devtools', JSON.stringify('/devtools'));
   });
-  await page.route('**/api/sessions/s2/messages', (route) =>
-    route.fulfill(
-      route.request().method() === 'POST'
-        ? { status: 202, json: { data: { message_id: 'm3' } } }
-        : { json: { data: [] } },
-    ),
-  );
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
-
-  await page.getByRole('button', { name: 'New terminal', exact: true }).click();
-  await expect(page.getByRole('tab', { name: 'new terminal' })).toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('button', { name: 'Effort' }).click();
-  await page.getByRole('option', { name: /^Max/ }).click();
-  await expect(page.getByRole('button', { name: 'Effort' })).toContainText('Max');
-
-  const prompt = page.getByRole('textbox', { name: 'Ask the agent' });
-  await prompt.fill('count shops');
-  await page.getByRole('button', { name: 'New terminal', exact: true }).click();
-  await expect(prompt).toHaveValue('');
-  await expect(prompt).toBeFocused();
-  await expect(page.getByRole('button', { name: 'Effort' })).not.toContainText('Max');
-
-  const fresh = page.getByRole('tab', { name: 'new terminal' });
-  await expect(fresh).toHaveCount(2);
-  await page.getByRole('tab', { name: SESSION.title }).click();
-  await expect(fresh).toHaveCount(2);
-  await fresh.first().click();
-  await expect(fresh.first()).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: 'Effort' })).toContainText('Max');
-  await expect(prompt).toHaveValue('count shops');
-
-  await page.reload();
-  await expect(fresh).toHaveCount(2);
-  await expect(fresh.first()).toHaveAttribute('aria-selected', 'true');
-  await expect(prompt).toHaveValue('count shops');
-  await expect(page.getByRole('button', { name: 'Effort' })).toContainText('Max');
-  await page.getByRole('button', { name: 'Close new terminal' }).last().click();
-  await expect(fresh).toHaveCount(1);
-
-  await prompt.press('Shift+Enter');
-  await prompt.pressSequentially('and orders');
-  await expect(prompt).toHaveValue('count shops\nand orders');
-  await expect.poll(() => created).toBeUndefined();
-  await prompt.press('Enter');
-  await expect.poll(() => created).toMatchObject({ kind: 'devtools', connection_ids: [], effort: 'max' });
+  await page.goto(daemon.url);
+  await expect(page).not.toHaveURL(/devtools/);
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Dev tools' })).toHaveCount(0);
 });
 
-test('a question across Connections shows a Result per Connection and the Comparison, differing rows marked', async ({
+test('an earlier Dev tools Session opens in Sessions with its Connections, and the composer changes them', async ({
   page,
 }) => {
-  await mock(page, [SESSION]);
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
+  const patches = await mock(page);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
+
+  await expect(page.getByText(SESSION.title).first()).toBeVisible();
+  const chips = page
+    .getByRole('complementary', { name: 'Session' })
+    .getByRole('list', { name: 'Connections the agent may reach' });
+  await expect(chips.getByRole('listitem')).toHaveText([/mongo-prod\s*PROD/, /pg-tenant/]);
+
+  await page.getByRole('button', { name: /^Connections: / }).click();
+  await page
+    .locator('[data-session-connections]')
+    .getByRole('button', { name: /mongo-prod/ })
+    .click();
+  await expect.poll(() => patches).toEqual([{ connection_ids: ['c1'] }]);
+});
+
+test('a Result per Connection and the Comparison are drawn in the Session, differing rows marked', async ({ page }) => {
+  await mock(page);
+  await page.goto(`${daemon.url}/sessions?session=s1#token=${daemon.token}`);
 
   const pg = page.getByRole('region', { name: 'Result from pg-tenant' });
   await expect(pg).toContainText('── pg-tenant · Postgres');
@@ -201,39 +181,6 @@ test('a question across Connections shows a Result per Connection and the Compar
   await expect(compared.getByRole('row', { name: /status/ })).not.toContainText('◀ differs');
   await expect(compared).toContainText('1 of 2 fields differ.');
   await expect(page.getByText('2 rows across 2 of 2 Connections. The plan differs.')).toBeVisible();
-
-  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
-  // Chrome's Clipboard API refuses on the click that brings an unfocused window forward; that click still copies.
-  await page.evaluate(() => {
-    navigator.clipboard.writeText = () =>
-      Promise.reject(new DOMException('Document is not focused.', 'NotAllowedError'));
-  });
-  await compared.getByRole('button', { name: 'Copy JSON' }).click();
-  await expect(compared.getByRole('button', { name: 'Copied' })).toBeVisible();
-  const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
-  expect(copied).toMatchObject({ key: 'shop_domain', connections: ['pg-tenant', 'mongo-prod'] });
-});
-
-test('a terminal whose agent is working stops, and its tab deletes only once it has', async ({ page }) => {
-  let state = 'working';
-  const stops: string[] = [];
-  await mock(page, []);
-  await page.route(/\/api\/sessions\?kind=devtools/, (route) =>
-    route.fulfill({ json: { data: [{ ...SESSION, state }] } }),
-  );
-  await page.route('**/api/sessions/s1/stop', (route) => {
-    stops.push(route.request().method());
-    state = 'idle';
-    return route.fulfill({ status: 204 });
-  });
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
-
-  const remove = page.getByRole('button', { name: /^Delete / });
-  await expect(remove).toBeDisabled();
-  await page.getByRole('button', { name: 'stop', exact: true }).click();
-  await expect.poll(() => stops).toEqual(['POST']);
-  await expect(page.getByRole('button', { name: 'stop', exact: true })).toHaveCount(0);
-  await expect(remove).toBeEnabled();
 });
 
 test('a PROD Connection can only be read: Read / write greys out, and picking PROD drops it to Read-only', async ({
@@ -260,49 +207,4 @@ test('a PROD Connection can only be read: Read / write greys out, and picking PR
     page.getByRole('group', { name: 'Claude access' }).getByRole('radio', { name: 'Read-only' }),
   ).toBeChecked();
   await expect(page.getByLabel('Service account key (JSON or base64)')).toBeVisible();
-});
-
-test("changing the scope of a terminal that has a Session works while the tray holds today's usage", async ({
-  page,
-}) => {
-  await mock(page, [SESSION]);
-  await page.route('**/api/agent-runs/usage', (route) =>
-    route.fulfill({ json: { data: { cost_usd: 1.5, tokens: 1200, runs: 2 } } }),
-  );
-  let patched: unknown;
-  await page.route('**/api/sessions/s1', (route) => {
-    patched = route.request().postDataJSON();
-    return route.fulfill({ json: { data: { ...SESSION, connection_ids: ['c1'] } } });
-  });
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
-
-  await page.getByRole('button', { name: 'Running agents' }).click();
-  await expect(page.getByText('today', { exact: false }).first()).toBeVisible();
-  await page
-    .getByRole('complementary', { name: 'Synced dev tools' })
-    .getByRole('button', { name: /pg-tenant/ })
-    .click();
-  await expect(page.getByText('scope: pg-tenant')).toBeVisible();
-  await expect.poll(() => patched).toEqual({ connection_ids: ['c1'] });
-  await expect(page.getByText('is not a function')).toBeHidden();
-});
-
-test('a paste into the terminal prompt keeps its first 10,000 characters and warns under the terminal', async ({
-  page,
-}) => {
-  await mock(page, []);
-  await page.goto(`${daemon.url}/devtools#token=${daemon.token}`);
-  const prompt = page.getByRole('textbox', { name: 'Ask the agent' });
-  await expect(prompt).toBeEnabled();
-  await expect(page.getByRole('status')).toHaveCount(0);
-
-  await prompt.evaluate((element) => {
-    element.focus();
-    const data = new DataTransfer();
-    data.setData('text/plain', 'y'.repeat(12000));
-    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-  });
-  await expect(prompt).toHaveValue('y'.repeat(10000));
-  await expect(page.getByRole('status')).toContainText('Only 10,000 characters are allowed at once');
-  await expect(page.getByRole('alert')).toHaveCount(0);
 });

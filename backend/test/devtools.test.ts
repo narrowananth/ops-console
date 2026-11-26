@@ -1,6 +1,8 @@
-import { AccessLevel, ConnectionEnv, ConnectionType } from '@ops-console/shared';
+import { AccessLevel, AccessMode, ConnectionEnv, ConnectionType, SessionKind } from '@ops-console/shared';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { ConnectionScopes } from '../src/agent/connection-scopes';
+import { SessionsService } from '../src/agent/sessions.service';
 import { ConnectionsModule } from '../src/connections/connections.module';
 import { actionLog, connections } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
@@ -75,9 +77,12 @@ const denied = (daemon: AgentDaemon, call = -1) =>
     ?.map((server) => server.serverName)
     .sort();
 
-const newSession = async (daemon: AgentDaemon, body: Record<string, unknown> = {}) => {
-  const response = await api(daemon).post('/sessions', { kind: 'devtools', access_mode: 'full', ...body });
-  expect(response.status).toBe(201);
+/** An earlier Dev tools Session: none can be made any more, so the row and its scope are written directly. */
+const newSession = async (daemon: AgentDaemon, body: { connection_ids?: string[] } = {}) => {
+  const row = daemon.app.get(SessionsService).create({ kind: SessionKind.Devtools, access_mode: AccessMode.Full });
+  daemon.app.get(ConnectionScopes).set(row.id, body.connection_ids ?? []);
+  const response = await api(daemon).get(`/sessions/${row.id}`);
+  expect(response.status).toBe(200);
   return response.body.data as { id: string; connection_ids: string[] };
 };
 
@@ -142,8 +147,6 @@ describe('scope', () => {
     const daemon = await start();
     const redis = await connect(daemon, { ...REDIS_LOCAL, access: 'none' });
     const mongo = await connect(daemon, MONGO_PROD);
-    const refused = await api(daemon).post('/sessions', { kind: 'devtools', connection_ids: [redis.id] });
-    expect([refused.status, refused.body.error.code]).toEqual([409, 'connection_no_access']);
     const made = await newSession(daemon, { connection_ids: [mongo.id] });
     const patched = await api(daemon).patch(`/sessions/${made.id}`, { connection_ids: [redis.id] });
     expect([patched.status, patched.body.error.code]).toEqual([409, 'connection_no_access']);
@@ -181,10 +184,12 @@ describe('scope', () => {
     expect(kept.connection_ids).toEqual([pg.id]);
   });
 
-  it('keeps connection_ids off other kinds', async () => {
+  it('makes no new Dev tools Session, and keeps connection_ids off other kinds', async () => {
     const daemon = await start();
-    const created = await api(daemon).post('/sessions', { kind: 'devtools' });
-    expect(created.body.data.connection_ids).toEqual([]);
+    const mongo = await connect(daemon, MONGO_PROD);
+    const created = await api(daemon).post('/sessions', { kind: 'devtools', connection_ids: [mongo.id] });
+    expect([created.status, created.body.error.code]).toEqual([400, 'validation_failed']);
+    expect((await api(daemon).get('/sessions?kind=devtools')).body.data).toEqual([]);
     expect((await api(daemon).post('/sessions', { kind: 'pr_review' })).body.error.code).toBe('validation_failed');
     expect((await api(daemon).post('/sessions', { kind: 'nope' })).body.error.code).toBe('validation_failed');
     const repoSession = daemon.createSession();
@@ -307,7 +312,7 @@ describe('PROD writes', () => {
         .write((tx) =>
           tx.update(connections).set({ env: ConnectionEnv.Prod }).where(eq(connections.id, made.id)).run(),
         );
-    const session = await newSession(daemon, { access_mode: 'full' });
+    const session = await newSession(daemon);
     daemon.sdk.script(access === 'read' && 'tool' in step ? { ...step, fails: 'server is read-only' } : step);
     await api(daemon).post(`/sessions/${session.id}/messages`, { text: 'change it' });
     if (decide) {

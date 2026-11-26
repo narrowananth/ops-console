@@ -13,7 +13,6 @@ test('the URL from ops-console open signs in, hides the token and shows the shel
   await expect(nav.getByRole('link', { name: 'Monitor' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Sessions' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Pull requests' })).toBeVisible();
-  await expect(nav.getByRole('link', { name: 'Dev tools' })).toBeVisible();
   expect(page.url()).not.toContain(daemon.token);
   expect(page.url()).not.toContain('#');
   expect(await page.evaluate(() => localStorage.getItem('ops-console.token'))).toBe(daemon.token);
@@ -35,7 +34,6 @@ test('the sidebar holds every page, and Setup is no page of it', async ({ page }
     'Sessions',
     'Pull requests',
     'Monitor',
-    'Dev tools',
     'Integrations',
     'Connections',
     'Repos',

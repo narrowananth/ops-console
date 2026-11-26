@@ -31,7 +31,8 @@ export function SessionConnections({ session }: { session: Session }) {
   // Each click builds on the last list asked for while an earlier one is still being saved, so quick clicks all stick.
   const asked = useRef({ pending: 0, ids: [] as string[] });
   const scope = session.connection_ids;
-  if (scope === null) return null;
+  // A PR Session's Connections come from its Repo's `.env`; there is nothing to tick.
+  if (scope === null || session.pr_action !== null) return null;
   const ids = picked.map((connection) => connection.id);
   const choice = picked.length === 0 ? 'none' : picked.map((connection) => connection.name).join(', ');
   const all = connections.data?.data ?? [];

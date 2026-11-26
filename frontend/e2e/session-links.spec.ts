@@ -94,7 +94,9 @@ async function routeWorkspace(page: Page, all: unknown[] = [session('s1')], onBr
       ...(onBranch ? [session('s1')] : []),
       ...(created.length > 0 ? [session('s2', { title: 'New Session' })] : []),
     ];
-    return route.fulfill({ json: { data: kind === 'anonymous' ? [] : kind === null ? all : inRepo } });
+    return route.fulfill({
+      json: { data: kind === 'anonymous' || kind === 'devtools' ? [] : kind === null ? all : inRepo },
+    });
   });
   await page.route(/\/api\/sessions\/s\d\/messages$/, (route) => route.fulfill({ json: { data: [] } }));
   await page.route(/\/api\/pull-requests\?/, (route) =>

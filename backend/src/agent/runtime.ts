@@ -1254,7 +1254,7 @@ export class AgentRuntime implements OnModuleDestroy {
     const extraDirs = [attached, outputFolder, ...repoFolders].filter((folder) => folder !== null);
     run.editRoots = editRoots({ workingDir: run.workingDir, outputFolder, repoFolders, configDir });
     const logSource = this.logSourceOf(session.alertId);
-    const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined && session.prAction === null, logSource);
+    const scope = mcpScope(run.purpose, kind?.deniedServers !== undefined, logSource);
     // Servers the operator disabled stay out of the run.
     const deniedServers = [
       ...this.store.db

@@ -97,7 +97,7 @@ async function route(page: Page, sessions: unknown[], messages: unknown[] = []) 
   await page.route('**/api/playbooks', (route) => route.fulfill({ json: { data: { items: [], blocks: [] } } }));
   await page.route(/\/api\/sessions(\?.*)?$/, (route) => {
     const kind = new URL(route.request().url()).searchParams.get('kind');
-    return route.fulfill({ json: { data: kind === 'anonymous' ? [] : sessions } });
+    return route.fulfill({ json: { data: kind === 'anonymous' || kind === 'devtools' ? [] : sessions } });
   });
   await page.route(/\/api\/sessions\/s1\/messages$/, (route) => route.fulfill({ json: { data: messages } }));
 }
