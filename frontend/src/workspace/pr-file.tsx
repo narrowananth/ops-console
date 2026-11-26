@@ -1,7 +1,9 @@
 import { GitHost, type PrFile, type PullRequestDetail } from '@ops-console/shared';
 import { memo, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
+import { MenuButton, MenuItem } from '../browser/menu-button';
 import { DiffLines, DiffStat, FullFileDiff, type LineComments, SplitDiff } from '../components/ui/diff';
+import { item } from '../components/ui/item';
 import { usePostComment, usePrFile } from '../lib/queries';
 import { useStored } from '../lib/remember';
 import { CommentComposer, Thread } from './pr-thread';
@@ -71,65 +73,47 @@ function FileMenu(props: {
   onSplit: () => void;
   onFull: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: Event) => {
-      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !box.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    window.addEventListener('mousedown', close);
-    window.addEventListener('keydown', close);
-    return () => {
-      window.removeEventListener('mousedown', close);
-      window.removeEventListener('keydown', close);
-    };
-  }, [open]);
-  const entry =
-    'block w-full cursor-pointer border-0 bg-transparent px-3 py-1.5 text-left font-body text-[13px] text-text no-underline hover:bg-neutral-200';
-  const pick = (action: () => void) => () => {
-    action();
-    setOpen(false);
-  };
   return (
-    <div ref={box} className="relative flex-none">
-      <button
-        type="button"
-        aria-label={`More for ${props.name}`}
-        title="Side by side, the whole file, or the file on the Git host"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className={`flex size-6.5 cursor-pointer items-center justify-center rounded-md border text-sm leading-none ${open ? 'border-accent-400 bg-accent-100 text-text' : 'border-divider bg-card text-neutral-700 hover:text-text'}`}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute top-full right-0 z-20 mt-1 w-48 overflow-hidden rounded-lg border border-divider bg-card py-1 shadow-lg"
-        >
-          <button type="button" role="menuitem" className={entry} onClick={pick(props.onSplit)}>
+    <MenuButton
+      label={`More for ${props.name}`}
+      title="Side by side, the whole file, or the file on the Git host"
+      width="w-48"
+      icon
+      menuChildren={(close) => (
+        <>
+          <MenuItem
+            onClick={() => {
+              props.onSplit();
+              close();
+            }}
+          >
             {props.split ? 'View unified' : 'View side-by-side'}
-          </button>
-          <button type="button" role="menuitem" className={entry} onClick={pick(props.onFull)}>
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              props.onFull();
+              close();
+            }}
+          >
             {props.full ? 'View changes only' : 'View entire file'}
-          </button>
+          </MenuItem>
           <a
             role="menuitem"
             href={props.source}
             target="_blank"
             rel="noreferrer"
-            className={entry}
-            onClick={() => setOpen(false)}
+            className={`flex w-full items-center px-2.5 py-1.5 text-[13px] no-underline outline-none focus-visible:bg-neutral-200 ${item(false)}`}
+            onClick={close}
           >
             Open in source ↗
           </a>
-        </div>
+        </>
       )}
-    </div>
+    >
+      <span aria-hidden className="text-sm leading-none">
+        ⋯
+      </span>
+    </MenuButton>
   );
 }
 
@@ -166,7 +150,13 @@ function useNearScreen(target: React.RefObject<HTMLElement | null>, soon: boolea
  */
 export const PrFileView = memo(
   ChangedFile,
-  (a, b) => a.pr === b.pr && a.file === b.file && a.viewed === b.viewed && a.bulk === b.bulk && a.reveal === b.reveal,
+  (a, b) =>
+    a.pr === b.pr &&
+    a.file === b.file &&
+    a.viewed === b.viewed &&
+    a.bulk === b.bulk &&
+    a.reveal === b.reveal &&
+    a.picked === b.picked,
 );
 
 function ChangedFile({
@@ -176,6 +166,7 @@ function ChangedFile({
   onViewed,
   bulk,
   reveal,
+  picked,
 }: {
   pr: PullRequestDetail;
   file: PrFile;
@@ -185,6 +176,8 @@ function ChangedFile({
   bulk: { open: boolean } | null;
   /** The last jump to a thread of this file from the Comments menu; each jump is a new object. */
   reveal: { file: string; thread: string } | null;
+  /** The last file picked in the file tree; each pick is a new object. */
+  picked: { file: string } | null;
 }) {
   const at = `${pr.repo_id}#${pr.number}.${file.name}`;
   const section = useRef<HTMLElement>(null);
@@ -200,6 +193,12 @@ function ChangedFile({
     setOpen(true);
     setJump(reveal.thread);
   }, [reveal, file.name, setOpen]);
+  // Picking this file in the tree opens it, whatever Collapse all or its fold left, and brings it to the top.
+  useEffect(() => {
+    if (picked?.file !== file.name) return;
+    setOpen(true);
+    section.current?.scrollIntoView({ block: 'start' });
+  }, [picked, file.name, setOpen]);
   useEffect(() => {
     if (jump === null || !open) return;
     section.current?.querySelector(`[data-thread="${CSS.escape(jump)}"]`)?.scrollIntoView({ block: 'center' });

@@ -7,6 +7,7 @@ const T0 = '2026-11-06T10:00:00.000Z';
 const T1 = '2026-11-06T10:05:00.000Z';
 const T2 = '2026-11-06T10:10:00.000Z';
 const SHOTS = process.env.VIEWER_SHOTS;
+const UI_SHOTS = process.env.UI_FIXES_SHOTS;
 
 type Served = { body: string; modified_at?: string };
 
@@ -478,7 +479,7 @@ test('a code block of a drawn language has Expand beside Copy and opens the View
   ).toBeVisible();
 });
 
-test('the Session panel lists every Output file newest first with its size, and a click opens the Viewer', async ({
+test('the Session panel lists the five newest Output files with their size, and a click opens the Viewer', async ({
   page,
 }) => {
   await open(page);
@@ -486,15 +487,71 @@ test('the Session panel lists every Output file newest first with its size, and 
     .getByRole('complementary', { name: 'Session' })
     .getByRole('list', { name: 'Files the agent wrote' });
   const items = list.getByRole('listitem');
-  await expect(items).toHaveCount(Object.keys(FILES).length);
+  await expect(items).toHaveCount(5);
   await expect(items.first()).toContainText('later.txt');
   await expect(items.first()).toContainText('5 B');
   await list.getByRole('button', { name: /report\.md/ }).click();
   await expect(page.getByRole('dialog', { name: 'report.md' })).toBeVisible();
-  // The list holds what the chips hold, also after a reload.
+  // The list holds the same five after a reload.
   await page.keyboard.press('Escape');
   await page.reload();
-  await expect(items).toHaveCount(Object.keys(FILES).length);
+  await expect(items).toHaveCount(5);
+});
+
+test('the Session panel shows five Output files, then Show N more reveals the rest and Show less folds back', async ({
+  page,
+}) => {
+  await open(page);
+  const names = Array.from({ length: 12 }, (_, at) => `out-${String(at + 1).padStart(2, '0')}.txt`);
+  await page.unroute('**/api/sessions/s1/outputs');
+  await page.route('**/api/sessions/s1/outputs', (route) =>
+    route.fulfill({
+      json: {
+        data: names.map((name, at) => ({
+          name,
+          size: 3,
+          modified_at: `2026-11-06T11:${String(at).padStart(2, '0')}:00.000Z`,
+        })),
+      },
+    }),
+  );
+  await page.reload();
+  const panel = page.getByRole('complementary', { name: 'Session' });
+  const items = panel.getByRole('list', { name: 'Files the agent wrote' }).getByRole('listitem');
+  const more = panel.getByRole('button', { name: 'Show 7 more' });
+  await expect(items).toHaveCount(5);
+  await expect(items.first()).toContainText('out-12.txt');
+  await expect(more).toHaveAttribute('aria-expanded', 'false');
+  await more.scrollIntoViewIfNeeded();
+  if (UI_SHOTS) await panel.screenshot({ path: `${UI_SHOTS}/output-files-collapsed.png` });
+
+  await more.click();
+  await expect(items).toHaveCount(12);
+  await expect(items.last()).toContainText('out-01.txt');
+  const less = panel.getByRole('button', { name: 'Show less' });
+  await expect(less).toHaveAttribute('aria-expanded', 'true');
+  await less.scrollIntoViewIfNeeded();
+  if (UI_SHOTS) await panel.screenshot({ path: `${UI_SHOTS}/output-files-expanded.png` });
+
+  await less.click();
+  await expect(items).toHaveCount(5);
+  await expect(panel.getByRole('button', { name: 'Show 7 more' })).toBeVisible();
+});
+
+test('the Session panel has no Show more button for exactly five Output files', async ({ page }) => {
+  await open(page);
+  await page.unroute('**/api/sessions/s1/outputs');
+  await page.route('**/api/sessions/s1/outputs', (route) =>
+    route.fulfill({
+      json: {
+        data: ['a', 'b', 'c', 'd', 'e'].map((name) => ({ name: `${name}.txt`, size: 1, modified_at: T1 })),
+      },
+    }),
+  );
+  await page.reload();
+  const panel = page.getByRole('complementary', { name: 'Session' });
+  await expect(panel.getByRole('list', { name: 'Files the agent wrote' }).getByRole('listitem')).toHaveCount(5);
+  await expect(panel.getByRole('button', { name: /^Show (\d+ more|less)/ })).toHaveCount(0);
 });
 
 test('the Session panel has no Output files section when the Session has none', async ({ page }) => {

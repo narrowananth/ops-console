@@ -180,16 +180,24 @@ const Section = ({ label, children }: { label?: string; children: ReactNode }) =
   </div>
 );
 
-/** Every Output file of the Session, newest first, each a row that opens the Viewer. */
+/** Rows shown before "Show N more". */
+const OUTPUT_FILES_SHOWN = 5;
+
+/** The Output files of the Session, newest first, the newest few with the rest behind "Show N more"; each a row that opens the Viewer. */
 function OutputFileList({ sessionId }: { sessionId: string }) {
   const files = useOutputFiles(sessionId);
   const [viewed, setViewed] = useState<Viewed | null>(null);
+  // The Session whose full list is open, so another Session starts folded.
+  const [openFor, setOpenFor] = useState<string | null>(null);
   const newest = [...(files.data ?? [])].sort((a, b) => b.modified_at.localeCompare(a.modified_at));
   if (newest.length === 0) return null;
+  const hidden = newest.length - OUTPUT_FILES_SHOWN;
+  const all = openFor === sessionId;
+  const shown = all || hidden <= 0 ? newest : newest.slice(0, OUTPUT_FILES_SHOWN);
   return (
     <Section label="Output files">
       <ul aria-label="Files the agent wrote" className="m-0 list-none p-0">
-        {newest.map((file) => (
+        {shown.map((file) => (
           <li key={file.name}>
             <Row
               icon={<FileKindIcon kind={kindOf(file.name)} size={14} />}
@@ -202,6 +210,16 @@ function OutputFileList({ sessionId }: { sessionId: string }) {
           </li>
         ))}
       </ul>
+      {hidden > 0 && (
+        <Row
+          icon={<ChevronIcon open={all} />}
+          expanded={all}
+          label={all ? 'Show less output files' : `Show ${hidden} more output files`}
+          onClick={() => setOpenFor(all ? null : sessionId)}
+        >
+          {all ? 'Show less' : `Show ${hidden} more`}
+        </Row>
+      )}
       {viewed && <AttachmentViewer viewed={viewed} onClose={() => setViewed(null)} />}
     </Section>
   );
