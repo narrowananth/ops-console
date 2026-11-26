@@ -175,6 +175,10 @@ function answer(result: object, launch: Launch, started: number): ConnectionTest
   if ((result as { isError?: boolean }).isError) {
     return { status: HealthStatus.Fail, latency_ms: null, detail: scrub(firstText(result), launch) };
   }
+  // `firebase mcp` answers a database that does not exist, or refuses the key, with a normal result holding only
+  // `{"error": "404 Not Found"}`: the server is up and the data is not reachable.
+  const refusal = /^\s*\{\s*"error"\s*:\s*"([^"]*)"\s*\}\s*$/.exec(allText(result) ?? '');
+  if (refusal) return { status: HealthStatus.Fail, latency_ms: null, detail: scrub(refusal[1] ?? '', launch) };
   return { status: HealthStatus.Ok, latency_ms: Date.now() - started, detail: null };
 }
 
@@ -185,10 +189,14 @@ function hashOf(launch: Launch): string {
     .digest('hex');
 }
 
-function firstText(result: object): string {
+function allText(result: object): string | undefined {
   const raw = (result as { content?: unknown }).content;
   const content = Array.isArray(raw) ? (raw as { type?: string; text?: string }[]) : [];
-  return (content.find((part) => part.type === 'text')?.text ?? 'the read failed').split('\n')[0] ?? 'the read failed';
+  return content.find((part) => part.type === 'text')?.text;
+}
+
+function firstText(result: object): string {
+  return (allText(result) ?? 'the read failed').split('\n')[0] ?? 'the read failed';
 }
 
 /** No response carries a secret (Behavior 10). */

@@ -264,6 +264,21 @@ describe('Firebase test read', () => {
     });
     expect(launch([FirebaseService.Auth])?.ping).toBeUndefined();
   });
+
+  it('reads the Realtime Database address the Connection names, not the project default', () => {
+    const named = launchFor({
+      type: ConnectionType.Firebase,
+      config: {
+        project_id: 'shop-123',
+        services: [FirebaseService.RealtimeDatabase],
+        database_url: 'https://shop-test-db.firebaseio.com',
+      },
+      secret: JSON.stringify({ type: 'service_account', project_id: 'shop-123' }),
+      access: AccessLevel.Read,
+      launchDir: LAUNCH_DIR,
+    });
+    expect(named?.ping?.args.databaseUrl).toBe('https://shop-test-db.firebaseio.com');
+  });
 });
 
 describe('Firebase', () => {
