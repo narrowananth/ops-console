@@ -194,6 +194,18 @@ function FileTree({
     sort === FileSort.Tree
       ? fileTree(pr.files)
       : sortedFiles(pr, sort).map((file) => ({ kind: 'file' as const, file, name: file.name, depth: 0 }));
+  // Folders the operator folded, by path. A row is hidden while any folder above it is folded.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (path: string) =>
+    setFolded((now) => {
+      const next = new Set(now);
+      if (!next.delete(path)) next.add(path);
+      return next;
+    });
+  const isHidden = (entry: (typeof entries)[number]) => {
+    const own = entry.kind === 'folder' ? entry.path : entry.file.name;
+    return [...folded].some((path) => own.startsWith(`${path}/`));
+  };
   return (
     <nav aria-label="Files in this pull request" className="flex w-68 flex-none flex-col border-r border-line">
       <div className="flex items-center px-2.5 pt-2 pb-1 text-[11px] tracking-wider text-neutral-600 uppercase">
@@ -209,45 +221,62 @@ function FileTree({
         </button>
       </div>
       <ul className="m-0 min-h-0 flex-1 list-none overflow-y-auto p-1.5 pb-3 text-[12.5px]">
-        {entries.map((entry) =>
-          entry.kind === 'folder' ? (
-            <li
-              key={entry.path}
-              style={{ ...guides(entry.depth), paddingLeft: 8 + entry.depth * 14 }}
-              className="flex items-center gap-1 truncate py-1 text-neutral-600"
-            >
-              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden className="flex-none">
-                <path d="M2 3.5l3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-              <span className="truncate">{entry.name}</span>
-            </li>
-          ) : (
-            <li key={entry.file.name} style={guides(entry.depth)} className="flow-root">
-              <button
-                type="button"
-                aria-current={active === entry.file.name}
-                title={entry.file.name}
-                onClick={() => onPick(entry.file)}
-                style={{ paddingLeft: 8 + entry.depth * 14 }}
-                className={`my-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md border-0 py-0.5 pr-2 text-left text-[12.5px] text-text ${active === entry.file.name ? 'bg-card font-semibold shadow-sm' : 'bg-transparent hover:bg-neutral-200'}`}
-              >
-                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                {unresolved(entry.file.name) > 0 && (
-                  <span
-                    title={`${unresolved(entry.file.name)} unresolved ${unresolved(entry.file.name) === 1 ? 'thread' : 'threads'}`}
-                    className="rounded-full bg-accent-200 px-1.5 font-mono text-[10px] font-semibold text-accent-900"
+        {entries
+          .filter((entry) => !isHidden(entry))
+          .map((entry) =>
+            entry.kind === 'folder' ? (
+              <li key={entry.path} style={guides(entry.depth)} className="flow-root">
+                <button
+                  type="button"
+                  aria-expanded={!folded.has(entry.path)}
+                  onClick={() => toggle(entry.path)}
+                  style={{ marginLeft: entry.depth * 14 }}
+                  className="my-0.5 flex cursor-pointer items-center gap-1 rounded-md border-0 bg-transparent px-2 py-0.5 text-left text-[12.5px] text-neutral-600 hover:bg-neutral-200"
+                >
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 10 10"
+                    aria-hidden
+                    className={`flex-none ${folded.has(entry.path) ? '-rotate-90' : ''}`}
                   >
-                    {unresolved(entry.file.name)}
+                    <path
+                      d="M2 3.5l3 3 3-3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <span className="truncate">{entry.name}</span>
+                </button>
+              </li>
+            ) : (
+              <li key={entry.file.name} style={guides(entry.depth)} className="flow-root">
+                <button
+                  type="button"
+                  aria-current={active === entry.file.name}
+                  onClick={() => onPick(entry.file)}
+                  style={{ marginLeft: entry.depth * 14 }}
+                  className={`my-0.5 flex cursor-pointer items-center gap-1.5 rounded-md border-0 py-0.5 pr-2 pl-2 text-left text-[12.5px] text-text ${active === entry.file.name ? 'bg-card font-semibold shadow-sm' : 'bg-transparent hover:bg-neutral-200'}`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                  {unresolved(entry.file.name) > 0 && (
+                    <span
+                      title={`${unresolved(entry.file.name)} unresolved ${unresolved(entry.file.name) === 1 ? 'thread' : 'threads'}`}
+                      className="rounded-full bg-accent-200 px-1.5 font-mono text-[10px] font-semibold text-accent-900"
+                    >
+                      {unresolved(entry.file.name)}
+                    </span>
+                  )}
+                  <span className="flex flex-none gap-1 font-mono text-[11px]">
+                    <span className="text-diff-add-text">+{entry.file.additions}</span>
+                    <span className="text-diff-del-text">−{entry.file.deletions}</span>
                   </span>
-                )}
-                <span className="flex flex-none gap-1 font-mono text-[11px]">
-                  <span className="text-diff-add-text">+{entry.file.additions}</span>
-                  <span className="text-diff-del-text">−{entry.file.deletions}</span>
-                </span>
-              </button>
-            </li>
-          ),
-        )}
+                </button>
+              </li>
+            ),
+          )}
       </ul>
     </nav>
   );
