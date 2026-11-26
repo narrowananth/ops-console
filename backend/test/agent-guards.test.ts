@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -18,7 +19,7 @@ import { AgentRuntime } from '../src/agent/runtime';
 import { connectors, sessions } from '../src/db/schema';
 import { STORE, type Store } from '../src/db/store';
 import { type AgentDaemon, api, converse, listen, startAgentDaemon, until, WORKING_DIR } from './agent-fixtures';
-import type { Step } from './fakes/agent-sdk';
+import type { Call, Step } from './fakes/agent-sdk';
 
 const running: AgentDaemon[] = [];
 afterEach(async () => {
@@ -495,7 +496,18 @@ describe('Figma Connector, read only', () => {
     }
     expect(daemon.sdk.ran).toEqual([]);
     await runTool(daemon, AccessMode.Full, tool('get_design_context'));
-    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__figma__get_design_context']);
+    // Figma's server asks an agent to open a session before its first file tool, and a Weave read is a read.
+    await runTool(daemon, AccessMode.Full, tool('create_session'));
+    await runTool(daemon, AccessMode.Full, tool('weave_get_workflow'));
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([
+      'mcp__figma__get_design_context',
+      'mcp__figma__create_session',
+      'mcp__figma__weave_get_workflow',
+    ]);
+    // Weave's runs spend credits: refused with no Approval.
+    const run = await runTool(daemon, AccessMode.Full, tool('weave_run_tool'));
+    expect(run.approvals).toEqual([]);
+    expect(daemon.sdk.ran).toHaveLength(3);
   });
 
   it('answers a refused call with the reason, as a failed step of the Session', async () => {
@@ -518,9 +530,16 @@ describe('Figma Connector, read only', () => {
     const daemon = await start();
     await converse(daemon, daemon.createSession(), 'hello');
     expect(refused(daemon)).toEqual(
-      expect.arrayContaining(['mcp__figma__use_figma', 'mcp__figma__create_shader', 'mcp__figma__send_code_to_figma']),
+      expect.arrayContaining([
+        'mcp__figma__use_figma',
+        'mcp__figma__create_shader',
+        'mcp__figma__send_code_to_figma',
+        'mcp__figma__create_branch',
+        'mcp__figma__weave_run_tool',
+      ]),
     );
     expect(refused(daemon)).not.toContain('mcp__figma__get_design_context');
+    expect(refused(daemon)).not.toContain('mcp__figma__create_session');
   });
 
   it('starts its server for a chat and for no job', async () => {
@@ -575,12 +594,566 @@ describe('Figma Connector, read only', () => {
     expect(append(daemon)).not.toMatch(/figma/i);
   });
 
+  it('refuses a job and a pull request’s Session the tools of a classed server under any name, with no Approval', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    for (const name of [
+      'mcp__claude_ai_Notion__notion-search',
+      'mcp__plugin_notion_notion__notion-fetch',
+      'mcp__Shortcut__stories-get-by-id',
+    ]) {
+      daemon.sdk.script({ tool: name, input: {} });
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
+      expect(
+        daemon.sdk.ran.map((call) => call.tool),
+        name,
+      ).not.toContain(name);
+    }
+    // The operator's own chat still reaches such a tool: only its Approval rules apply.
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ tool: 'mcp__claude_ai_Notion__notion-search', input: {} });
+    await converse(daemon, id, 'look it up');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toContain('mcp__claude_ai_Notion__notion-search');
+  });
+
   it('tells a job nothing about Figma', async () => {
     const daemon = await start();
     connect(daemon, HealthStatus.Ok);
     const runtime = daemon.app.get(AgentRuntime);
     await runtime.runFor(daemon.createSession(), 'job', null, { purpose: RunPurpose.Verify }).finished;
     expect(append(daemon)).not.toMatch(/figma/i);
+  });
+});
+
+describe('Notion Connector, tool classes', () => {
+  const write: Step = {
+    tool: 'mcp__notion__notion-update-page',
+    input: { page_id: '1f3a-page', properties: { title: 'Release notes' } },
+  };
+  const destroy: Step = { tool: 'mcp__notion__notion-delete-pages', input: { page_ids: ['1f3a-page'] } };
+  const unlisted: Step = { tool: 'mcp__notion__notion-a-later-tool', input: { page_id: '1f3a-page' } };
+  const read: Step = { tool: 'mcp__notion__notion-fetch', input: { id: '1f3a-page' } };
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const denied = (daemon: AgentDaemon) =>
+    (
+      calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors).set({ status }).where(eq(connectors.id, ConnectorId.Notion)).run();
+    });
+  const transcript = (call: Call) =>
+    readFile(
+      path.join(
+        call.configDir,
+        'projects',
+        (call.options.cwd ?? '').replace(/[^A-Za-z0-9]/g, '-'),
+        `${call.sessionId}.jsonl`,
+      ),
+      'utf8',
+    );
+
+  it('asks once about a write in every mode but full, and runs it only after a yes', async () => {
+    const daemon = await start();
+    const modes = [AccessMode.Supervised, AccessMode.AcceptEdits, AccessMode.Auto];
+    for (const [done, mode] of modes.entries()) {
+      const { approvals } = await runTool(daemon, mode, write, 'approved');
+      expect(approvals, mode).toHaveLength(done + 1);
+      expect(daemon.sdk.ran, mode).toHaveLength(done + 1);
+    }
+    expect(await api(daemon).get('/approvals')).toMatchObject({
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'command',
+            status: 'approved',
+            is_prod: false,
+            summary: 'Notion: notion-update-page, page_id 1f3a-page, "Release notes"',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('a denied write never runs, and the agent is told not to retry it another way', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, write, 'denied');
+    expect(approvals).toEqual([expect.objectContaining({ status: 'denied' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(await transcript(calls(daemon)[0] as Call)).toContain(
+      'The operator denied this. Do not retry it another way.',
+    );
+    expect((await api(daemon).get('/action-log')).body.data).toEqual([
+      expect.objectContaining({ target: 'Notion', outcome: 'denied' }),
+    ]);
+  });
+
+  it('runs a write in full access at once with no Approval, and still logs it before the call', async () => {
+    const daemon = await start();
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ ...write, hold });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    // The call is held after its PreToolUse: the row exists and is pending before the call has run.
+    const [row] = await until(
+      async () => (await api(daemon).get('/action-log')).body.data,
+      (rows) => rows.length === 1,
+      'the Action Log row',
+    );
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(row).toMatchObject({ kind: 'query', target: 'Notion', outcome: 'pending', is_prod: false });
+    expect(row.command).toBe('notion-update-page, page_id 1f3a-page, "Release notes"');
+    release();
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__notion__notion-update-page']);
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
+    expect((await api(daemon).get('/action-log')).body.data[0]).toMatchObject({ outcome: 'ok' });
+  });
+
+  it('asks about a delete and about a tool no list names even in full access, and runs them only after a yes', async () => {
+    const daemon = await start();
+    for (const [done, step] of [destroy, unlisted].entries()) {
+      const { approvals } = await runTool(daemon, AccessMode.Full, step, 'approved');
+      expect(approvals).toHaveLength(done + 1);
+      expect(daemon.sdk.ran).toHaveLength(done + 1);
+    }
+    const { approvals } = await runTool(daemon, AccessMode.Full, destroy, 'denied');
+    expect(approvals).toHaveLength(3);
+    expect(daemon.sdk.ran).toHaveLength(2);
+    expect(approvals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'command',
+          is_prod: false,
+          summary: 'Notion: notion-delete-pages, page_ids 1f3a-page',
+        }),
+      ]),
+    );
+  });
+
+  it('holds a delete in full access as a pending Approval that the Stop button expires', async () => {
+    const daemon = await start();
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script(destroy);
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'tidy up' });
+    await stateOf(daemon, id, 'waiting_approval');
+    expect(await pendingApproval(daemon)).toMatchObject({ session_id: id, kind: 'command', is_prod: false });
+    expect((await api(daemon).post(`/sessions/${id}/stop`, {})).status).toBe(204);
+    await stateOf(daemon, id, 'idle');
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([expect.objectContaining({ status: 'expired' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('a read raises no Approval of its own in the modes that let tools run', async () => {
+    const daemon = await start();
+    for (const mode of [AccessMode.Auto, AccessMode.Full]) {
+      expect((await runTool(daemon, mode, read)).approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__notion__notion-fetch', 'mcp__notion__notion-fetch']);
+  });
+
+  it('puts the tool and its main inputs, capped and redacted, in the row and the Approval, and no page content', async () => {
+    const daemon = await start();
+    const page = `${'Q3 plan. '.repeat(600)}END-OF-PAGE-MARKER`;
+    const step: Step = {
+      tool: 'mcp__notion__notion-create-pages',
+      input: {
+        parent: { page_id: '1f3a-parent' },
+        pages: [{ properties: { title: 'Plan' }, content: `${page} token=hunter2xyz` }],
+      },
+    };
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, step, 'approved');
+    const [row] = (await api(daemon).get('/action-log')).body.data;
+    for (const text of [row.command, (approvals as { summary: string }[])[0]?.summary ?? '']) {
+      expect(text.length).toBeLessThan(400);
+      expect(text).not.toContain('END-OF-PAGE-MARKER');
+      expect(text).toContain('page_id 1f3a-parent');
+      expect(text).not.toContain('hunter2xyz');
+    }
+  });
+
+  it('leaves another server’s tools alone: a Sentry write asks no class question', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Full, { tool: 'mcp__sentry__update_issue', input: {} });
+    expect(approvals).toEqual([]);
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__sentry__update_issue']);
+  });
+
+  it('does not leave Notion’s writes out of the run’s tool list', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'hello');
+    const refused = calls(daemon).at(-1)?.options.disallowedTools ?? [];
+    expect(refused.filter((rule) => rule.startsWith('mcp__notion__'))).toEqual([]);
+  });
+
+  it('starts its server for a chat and for no job, and no pull request Session', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'read the spec');
+    expect(denied(daemon)).not.toContain('notion');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('notion');
+      expect(append(daemon), purpose).not.toMatch(/notion/i);
+    }
+    const pr = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, pr)).run();
+    });
+    await converse(daemon, pr, 'review it');
+    expect(denied(daemon)).toContain('notion');
+    expect(append(daemon)).not.toMatch(/notion/i);
+  });
+
+  it('tells the agent how Notion is sorted only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/notion/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toContain('mcp__notion__notion-fetch');
+    expect(append(daemon)).toContain('mcp__notion__notion-update-page');
+    expect(append(daemon)).toMatch(/always ask/);
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/notion/i);
+  });
+});
+
+describe('Shortcut Connector, tool classes by the words of the name', () => {
+  const write: Step = {
+    tool: 'mcp__shortcut__stories-update',
+    input: { story_id: 1234, name: 'Fix the cart' },
+  };
+  const destroy: Step = { tool: 'mcp__shortcut__epics-delete', input: { epic_id: 7 } };
+  const unplaced: Step = { tool: 'mcp__shortcut__iterations-frobnicate', input: { iteration_id: 9 } };
+  const read: Step = { tool: 'mcp__shortcut__stories-get-by-id', input: { story_id: 1234 } };
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const denied = (daemon: AgentDaemon) =>
+    (
+      calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors).set({ status }).where(eq(connectors.id, ConnectorId.Shortcut)).run();
+    });
+
+  it('a read runs with no Approval in auto and full access', async () => {
+    const daemon = await start();
+    for (const mode of [AccessMode.Auto, AccessMode.Full]) {
+      expect((await runTool(daemon, mode, read)).approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([
+      'mcp__shortcut__stories-get-by-id',
+      'mcp__shortcut__stories-get-by-id',
+    ]);
+  });
+
+  it('asks once about a write in every mode but full, and runs it only after a yes', async () => {
+    const daemon = await start();
+    const modes = [AccessMode.Supervised, AccessMode.AcceptEdits, AccessMode.Auto];
+    for (const [done, mode] of modes.entries()) {
+      const { approvals } = await runTool(daemon, mode, write, 'approved');
+      expect(approvals, mode).toHaveLength(done + 1);
+      expect(daemon.sdk.ran, mode).toHaveLength(done + 1);
+    }
+    expect(await api(daemon).get('/approvals')).toMatchObject({
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'command',
+            status: 'approved',
+            summary: 'Shortcut: stories-update, story_id 1234, "Fix the cart"',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('a denied write never runs', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, write, 'denied');
+    expect(approvals).toEqual([expect.objectContaining({ status: 'denied' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('runs a write in full access at once with no Approval, and logs it before the call', async () => {
+    const daemon = await start();
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ ...write, hold });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    const [row] = await until(
+      async () => (await api(daemon).get('/action-log')).body.data,
+      (rows) => rows.length === 1,
+      'the Action Log row',
+    );
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(row).toMatchObject({ kind: 'query', target: 'Shortcut', outcome: 'pending', is_prod: false });
+    expect(row.command).toBe('stories-update, story_id 1234, "Fix the cart"');
+    release();
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__shortcut__stories-update']);
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
+  });
+
+  it('asks about a delete and about a name no group places in every mode, full included', async () => {
+    const daemon = await start();
+    for (const [done, step] of [destroy, unplaced].entries()) {
+      const { approvals } = await runTool(daemon, AccessMode.Full, step, 'approved');
+      expect(approvals).toHaveLength(done + 1);
+      expect(daemon.sdk.ran).toHaveLength(done + 1);
+    }
+    const { approvals } = await runTool(daemon, AccessMode.Full, destroy, 'denied');
+    expect(approvals).toHaveLength(3);
+    expect(daemon.sdk.ran).toHaveLength(2);
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Shortcut: epics-delete, epic_id 7' })]),
+    );
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Shortcut: iterations-frobnicate, iteration_id 9' })]),
+    );
+  });
+
+  it('starts its server for a chat and for no job, and no pull request Session', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'read the story');
+    expect(denied(daemon)).not.toContain('shortcut');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('shortcut');
+      expect(append(daemon), purpose).not.toMatch(/shortcut/i);
+    }
+    const pr = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, pr)).run();
+    });
+    await converse(daemon, pr, 'review it');
+    expect(denied(daemon)).toContain('shortcut');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+  });
+
+  it('tells the agent the rule only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toMatch(/Shortcut can be read and changed/);
+    expect(append(daemon)).toMatch(/always asks/);
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/shortcut/i);
+  });
+});
+
+describe('Render Connector, tool classes by lists', () => {
+  const MARKER = 'marker-value-7f3c9';
+  const read: Step = { tool: 'mcp__render__list_services', input: { limit: 20 } };
+  const write: Step = {
+    tool: 'mcp__render__create_cron_job',
+    input: { name: 'nightly-report', schedule: '0 3 * * *' },
+  };
+  const sql: Step = {
+    tool: 'mcp__render__query_render_postgres',
+    input: { postgresId: 'dpg-abc', sql: 'SELECT count(*) FROM orders' },
+  };
+  const env: Step = {
+    tool: 'mcp__render__update_environment_variables',
+    input: {
+      serviceId: 'srv-abc123',
+      envVars: [
+        { key: 'DATABASE_URL', value: `postgres://u:${MARKER}@db.example.com/app` },
+        { key: 'FEATURE_FLAG', value: MARKER },
+      ],
+    },
+  };
+  const deploy: Step = { tool: 'mcp__render__trigger_deploy', input: { serviceId: 'srv-abc123' } };
+  const unlisted: Step = { tool: 'mcp__render__delete_service', input: { serviceId: 'srv-abc123' } };
+  const calls = (daemon: AgentDaemon) => daemon.sdk.calls;
+  const append = (daemon: AgentDaemon) =>
+    (calls(daemon).at(-1)?.options.systemPrompt as { append: string } | undefined)?.append ?? '';
+  const denied = (daemon: AgentDaemon) =>
+    (
+      calls(daemon).at(-1)?.options.settings as { deniedMcpServers?: { serverName: string }[] } | undefined
+    )?.deniedMcpServers?.map((server) => server.serverName) ?? [];
+  const connect = (daemon: AgentDaemon, status: HealthStatus) =>
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(connectors)
+        .set({ status })
+        .where(eq(connectors.id, 'render' as ConnectorId))
+        .run();
+    });
+
+  it('a read runs with no Approval in auto and full access', async () => {
+    const daemon = await start();
+    for (const mode of [AccessMode.Auto, AccessMode.Full]) {
+      expect((await runTool(daemon, mode, read)).approvals, mode).toEqual([]);
+    }
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual([
+      'mcp__render__list_services',
+      'mcp__render__list_services',
+    ]);
+  });
+
+  it('asks once about a write and about SQL on a database in every mode but full, and runs them only after a yes', async () => {
+    const daemon = await start();
+    let asked = 0;
+    for (const step of [write, sql]) {
+      for (const mode of [AccessMode.Supervised, AccessMode.AcceptEdits, AccessMode.Auto]) {
+        asked += 1;
+        const { approvals } = await runTool(daemon, mode, step, 'approved');
+        expect(approvals, mode).toHaveLength(asked);
+        expect(daemon.sdk.ran, mode).toHaveLength(asked);
+      }
+    }
+    expect(await api(daemon).get('/approvals')).toMatchObject({
+      body: {
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'command',
+            status: 'approved',
+            summary: 'Render: query_render_postgres, postgresId dpg-abc, "SELECT count(*) FROM orders"',
+          }),
+        ]),
+      },
+    });
+  });
+
+  it('a denied write never runs', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Supervised, write, 'denied');
+    expect(approvals).toEqual([expect.objectContaining({ status: 'denied' })]);
+    expect(daemon.sdk.ran).toEqual([]);
+  });
+
+  it('runs a write in full access at once with no Approval, and logs it before the call', async () => {
+    const daemon = await start();
+    let release: () => void = () => {};
+    const hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const id = daemon.createSession({ access_mode: AccessMode.Full });
+    daemon.sdk.script({ ...write, hold });
+    await api(daemon).post(`/sessions/${id}/messages`, { text: 'go' });
+    const [row] = await until(
+      async () => (await api(daemon).get('/action-log')).body.data,
+      (rows) => rows.length === 1,
+      'the Action Log row',
+    );
+    expect(daemon.sdk.ran).toEqual([]);
+    expect(row).toMatchObject({ kind: 'query', target: 'Render', outcome: 'pending', is_prod: false });
+    expect(row.command).toBe('create_cron_job, "nightly-report"');
+    release();
+    await stateOf(daemon, id, 'idle');
+    expect(daemon.sdk.ran.map((call) => call.tool)).toEqual(['mcp__render__create_cron_job']);
+    expect((await api(daemon).get('/approvals')).body.data).toEqual([]);
+  });
+
+  it('asks about a deploy, an environment change and an unlisted tool in every mode, full included', async () => {
+    const daemon = await start();
+    for (const [done, step] of [deploy, env, unlisted].entries()) {
+      const { approvals } = await runTool(daemon, AccessMode.Full, step, 'approved');
+      expect(approvals).toHaveLength(done + 1);
+      expect(daemon.sdk.ran).toHaveLength(done + 1);
+    }
+    const { approvals } = await runTool(daemon, AccessMode.Full, deploy, 'denied');
+    expect(approvals).toHaveLength(4);
+    expect(daemon.sdk.ran).toHaveLength(3);
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Render: trigger_deploy, serviceId srv-abc123' })]),
+    );
+    expect(approvals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ summary: 'Render: delete_service, serviceId srv-abc123' })]),
+    );
+  });
+
+  it('shows the variable names of an environment change in the Approval and the Action Log, never a value', async () => {
+    const daemon = await start();
+    const { approvals } = await runTool(daemon, AccessMode.Full, env, 'approved');
+    const wanted = 'Render: update_environment_variables, serviceId srv-abc123, envVars DATABASE_URL, FEATURE_FLAG';
+    expect(approvals).toEqual([expect.objectContaining({ summary: wanted })]);
+    const rows = (await api(daemon).get('/action-log')).body.data;
+    expect(rows).toEqual([
+      expect.objectContaining({
+        target: 'Render',
+        command: 'update_environment_variables, serviceId srv-abc123, envVars DATABASE_URL, FEATURE_FLAG',
+      }),
+    ]);
+    // Nothing the operator or the console stored about the call holds a value.
+    expect(JSON.stringify(approvals)).not.toContain(MARKER);
+    expect(JSON.stringify(rows)).not.toContain(MARKER);
+  });
+
+  it('starts its server for a chat and for no job, and no pull request Session', async () => {
+    const daemon = await start();
+    const runtime = daemon.app.get(AgentRuntime);
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'list the services');
+    expect(denied(daemon)).not.toContain('render');
+    for (const purpose of [
+      RunPurpose.Verify,
+      RunPurpose.Fix,
+      RunPurpose.AgentReview,
+      RunPurpose.ReplyCheck,
+      RunPurpose.CommentPass,
+    ]) {
+      await runtime.runFor(daemon.createSession(), 'job', null, { purpose }).finished;
+      expect(denied(daemon), purpose).toContain('render');
+      expect(append(daemon), purpose).not.toMatch(/render/i);
+    }
+    const pr = daemon.createSession();
+    daemon.app.get<Store>(STORE).write((tx) => {
+      tx.update(sessions).set({ prAction: PrAction.Review }).where(eq(sessions.id, pr)).run();
+    });
+    await converse(daemon, pr, 'review it');
+    expect(denied(daemon)).toContain('render');
+    expect(append(daemon)).not.toMatch(/render/i);
+  });
+
+  it('tells the agent the lists only while the Connector is connected', async () => {
+    const daemon = await start();
+    await converse(daemon, daemon.createSession(), 'one');
+    expect(append(daemon)).not.toMatch(/render/i);
+
+    connect(daemon, HealthStatus.Ok);
+    await converse(daemon, daemon.createSession(), 'two');
+    expect(append(daemon)).toMatch(/Render can be read and changed/);
+    expect(append(daemon)).toContain('mcp__render__list_services');
+    expect(append(daemon)).toMatch(/always ask, in every Access mode/);
+
+    connect(daemon, HealthStatus.Auth);
+    await converse(daemon, daemon.createSession(), 'three');
+    expect(append(daemon)).not.toMatch(/render/i);
   });
 });
 

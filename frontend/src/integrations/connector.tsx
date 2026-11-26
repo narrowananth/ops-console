@@ -22,6 +22,7 @@ import { LogFolderStep, savedFolder } from './log-folder';
 import { CloudWatchStep, savedCloudWatch } from './log-groups';
 import { LokiStep } from './loki-logs';
 import { NewRelicStep } from './new-relic-logs';
+import { RenderStep } from './render-key';
 import { LOG_SOURCES, SignInStep } from './sign-in-step';
 
 /** What Connect does for a Connector that reads logs instead of signing in to a service. */
@@ -32,6 +33,7 @@ const NOT_SET_UP: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.LokiLogs]:
     'Not set up yet. Connect signs in to Grafana Cloud, in your browser, and starts reading Loki.',
   [ConnectorId.NewRelicLogs]: 'Not set up yet. Connect signs in to New Relic, in your browser, and starts reading it.',
+  [ConnectorId.Render]: 'Not set up yet. Paste a Render API key, then Connect adds its MCP Server.',
 };
 
 /** The row and the pane read the same: signing in, not connected, or the check's status. */
@@ -62,6 +64,12 @@ const DISCONNECT: Partial<Record<ConnectorId, string>> = {
     'Stops the console reading New Relic and removes the New Relic MCP Server. New Relic and its logs stay as they are, and the Region and account you picked stay for the next Connect.',
   [ConnectorId.Figma]:
     'Stops Sessions reading Figma and removes the Figma MCP Server. Your Figma account and files stay as they are.',
+  [ConnectorId.Notion]:
+    'Stops Sessions using Notion and removes the Notion MCP Server. Your Notion account and pages stay as they are.',
+  [ConnectorId.Shortcut]:
+    'Stops Sessions using Shortcut and removes the Shortcut MCP Server. Your Shortcut account, stories and epics stay as they are.',
+  [ConnectorId.Render]:
+    'Stops Sessions using Render and removes the Render MCP Server and the API key from the Keychain. The key stays valid at Render: delete it in the Render dashboard. Your services and databases stay as they are.',
 };
 
 /** What Disconnect says for New Relic logs read with a User API key. */
@@ -72,6 +80,12 @@ const NEW_RELIC_KEY_DISCONNECT =
 const NOTES: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.Figma]:
     "Read only. Sessions can look at your designs and never change them. Figma's own limits apply: Dev and Full seats on a paid plan get 200 calls a day on Professional, View and Collab seats 20 a month, and Starter plans none.",
+  [ConnectorId.Notion]:
+    "Sessions can read your workspace. A change asks you first, a delete always asks, and Full access skips the first. Notion's own limits apply: 180 requests a minute, 600 on Business and Enterprise.",
+  [ConnectorId.Shortcut]:
+    "Sessions can read your stories, epics and iterations. A change asks you first, a delete always asks, and Full access skips the first. A tool the console cannot place asks every time. Shortcut's own limit is 200 requests a minute.",
+  [ConnectorId.Render]:
+    'Create the key with Read only to let Sessions read your services, deploys and logs, or with Read and write to let approved changes run. A change asks you first, a deploy or an environment change always asks, and Full access skips the first.',
 };
 
 const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
@@ -80,6 +94,9 @@ const DISCONNECT_TITLE: Partial<Record<ConnectorId, string>> = {
   [ConnectorId.LokiLogs]: 'Stop the console reading Loki and remove its sign-in. Asks first.',
   [ConnectorId.NewRelicLogs]: 'Stop the console reading New Relic and remove its MCP Server. Asks first.',
   [ConnectorId.Figma]: 'Stop Sessions reading Figma and remove its MCP Server. Asks first.',
+  [ConnectorId.Notion]: 'Stop Sessions using Notion and remove its MCP Server. Asks first.',
+  [ConnectorId.Shortcut]: 'Stop Sessions using Shortcut and remove its MCP Server. Asks first.',
+  [ConnectorId.Render]: 'Stop Sessions using Render and remove its MCP Server and API key. Asks first.',
 };
 
 /** One Connector: Connect, Reconnect or Disconnect. Nothing else is set here. */
@@ -145,6 +162,8 @@ export function ConnectorDrawer({ connector, onBack }: { connector: Connector; o
           <LokiStep {...logPane} />
         ) : connector.id === ConnectorId.NewRelicLogs ? (
           <NewRelicStep {...logPane} />
+        ) : connector.id === ConnectorId.Render ? (
+          <RenderStep {...logPane} />
         ) : (
           <SignInStep
             connector={connector}
@@ -226,8 +245,8 @@ function lineSuffix(connector: Connector): string {
 
 /** A Connector in the Integrations list. Off reads "not connected": a Connector is never disabled. */
 export function ConnectorAction({ connector, onOpen }: { connector: Connector; onOpen: () => void }) {
-  // A log source signs in again from the pane's Reconnect.
-  const reconnects = LOG_SOURCES.includes(connector.id);
+  // A log source, and Render with its key, sign in again from the pane's Reconnect.
+  const reconnects = LOG_SOURCES.includes(connector.id) || connector.id === ConnectorId.Render;
   const action =
     connector.status === HealthStatus.Off
       ? 'Connect'

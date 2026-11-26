@@ -101,6 +101,11 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   private readonly leaving = new Set<string>();
   /** Background Removes, one after another. */
   private queue: Promise<void> = Promise.resolve();
+  /**
+   * Registrations, one after another. Each copies the entry `claude mcp add` wrote into every other account's config
+   * file by reading and writing the whole file, so two at once can overwrite each other and lose a server.
+   */
+  private registering: Promise<void> = Promise.resolve();
   /** Bumped when the config changes, so a Probe started before then is not kept. */
   private generation = 0;
   private readonly logins = new Set<AbortController>();
@@ -539,7 +544,17 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** Adds (or, when `previous` is given, replaces) the server in every account; a failure undoes the accounts done. */
-  private async register(
+  private register(...args: Parameters<McpServersService['registerNow']>): Promise<void> {
+    const run = this.registering.then(() => this.registerNow(...args));
+    // A failure rejects the caller and leaves the next registration free to start.
+    this.registering = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async registerNow(
     name: string,
     scope: McpScope,
     transport: McpTransport,
@@ -863,7 +878,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
       if (generation !== this.generation) return result;
       const before = this.probes.get(key);
       this.probes.set(key, result);
-      this.announce(before, result, names);
+      await this.announce(before, result, names);
       return result;
     })().finally(() => {
       if (this.probing.get(key) === run) this.probing.delete(key);
@@ -873,13 +888,17 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
   }
 
   /** `connection.checked` for each server whose reading moved, so an open list reads again. */
-  private announce(before: Probed | undefined, after: Probed, names: string[]): void {
+  private async announce(before: Probed | undefined, after: Probed, names: string[]): Promise<void> {
     const read = (probed: Probed | undefined, name: string) => {
       const server = probed?.servers?.get(name);
       return probed === undefined ? 'unread' : `${probed.servers === null}|${server?.status}|${server?.tools.length}`;
     };
     const moved = names.filter((name) => read(before, name) !== read(after, name));
     if (moved.length === 0) return;
+    // The keys are read from the Keychain, not the in-memory copy: after a restart that copy is empty until first used.
+    const secrets = new Map(
+      await Promise.all(moved.map(async (name) => [name, envSecrets(await this.storedEnv(name))] as const)),
+    );
     this.store.write((_tx, emit) => {
       for (const name of moved) {
         const server = after.servers?.get(name);
@@ -887,7 +906,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
           target: CheckTarget.McpServer,
           id: name,
           status: server?.status === 'connected' ? HealthStatus.Ok : server ? HealthStatus.Auth : HealthStatus.Fail,
-          detail: server?.error ?? null,
+          detail: server?.error ? scrub(server.error, secrets.get(name) ?? []) : null,
           latency_ms: null,
         });
       }
@@ -978,7 +997,7 @@ export class McpServersService implements OnApplicationBootstrap, OnModuleDestro
         states.find((s) => s.status !== HealthStatus.Auth) ??
         states[0] ?? { status: HealthStatus.Fail, detail: 'no signed-in Claude account', tools: [] as string[] };
       const enabled = !disabled.has(name);
-      const secrets = [...Object.values(entry.headers), ...Object.values(unwrapped ? await this.storedEnv(name) : {})];
+      const secrets = [...Object.values(entry.headers), ...envSecrets(unwrapped ? await this.storedEnv(name) : {})];
       out.push({
         name,
         scope: projectItem ? McpScope.Project : entry.scope,
@@ -1102,6 +1121,12 @@ function toAdd(entry: RegisteredServer): McpServerToAdd {
 /** A blank value in an edit keeps the stored one. */
 function nonBlank(values: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
+}
+
+/** The env var values to scrub, and for a `Bearer <token>` value the token alone, which a server may echo by itself. */
+function envSecrets(env: Record<string, string>): string[] {
+  const values = Object.values(env);
+  return [...values, ...values.map((value) => value.replace(/^Bearer\s+/i, ''))];
 }
 
 /** No response carries an env var or header value (Behavior 15). */

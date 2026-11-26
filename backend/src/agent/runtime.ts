@@ -108,7 +108,6 @@ import {
   SPAWN_SESSIONS_TOOL,
   spawnSessionsInputSchema,
 } from './pull-request-tool';
-import { READ_LIST_SERVERS, readListDenial, readListNote, readListRefusals } from './read-lists';
 import { gitControl, runSandbox, worktreeGitDirs } from './run-sandbox';
 import { DEFAULT_JOB_RUN_LIMIT, RunSlots } from './run-slots';
 import { RunStepsLog } from './run-steps';
@@ -137,6 +136,16 @@ import {
 import { type ResolvedSkill, SkillMenuService } from './skill-menu.service';
 import { removeSkillPlugin, skillNames, skillRunsDir, writeSkillPlugin } from './skill-plugin';
 import { CONSOLE_SUBAGENTS } from './subagents';
+import {
+  askSummary,
+  CLASSED_SERVERS,
+  isClassedTool,
+  type ToolAsk,
+  toolAsk,
+  toolNote,
+  toolRefusal,
+  toolRefusals,
+} from './tool-classes';
 import { Transcripts } from './transcripts';
 
 /**
@@ -1266,14 +1275,14 @@ export class AgentRuntime implements OnModuleDestroy {
       ...(run.purpose === RunPurpose.Verify ? this.writableConnections() : []),
       ...(scope.withoutConnections ? this.connectionServers() : []),
       ...scope.withoutConnectors,
-      // A pull request's Session reads text the operator did not write: it reaches no server with a Read list.
-      ...(session.prAction === null ? [] : READ_LIST_SERVERS),
+      // A pull request's Session reads text the operator did not write: it reaches no server with Tool classes.
+      ...(session.prAction === null ? [] : CLASSED_SERVERS),
     ];
-    // A server with a Read list is described only to a run that starts it, for a Connector that is connected.
+    // A server with Tool classes is described only to a run that starts it, for a Connector that is connected.
     const connected = this.connectedServers();
     const readNotes = scope.none
       ? []
-      : READ_LIST_SERVERS.filter((name) => connected.includes(name) && !deniedServers.includes(name)).map(readListNote);
+      : CLASSED_SERVERS.filter((name) => connected.includes(name) && !deniedServers.includes(name)).map(toolNote);
     // The console tools this run offers, for `key`: the servers' own objects cannot be compared.
     const tools: string[] = [];
     const options: Options = {
@@ -1400,8 +1409,8 @@ export class AgentRuntime implements OnModuleDestroy {
         ...(run.readOnly ? READ_ONLY_DENIALS : []),
         // Log text steers a Verification: it writes to no Git host and to no Connection (ADR 0002).
         ...(run.purpose === RunPurpose.Verify ? HOST_WRITE_DENIALS : []),
-        // Not offered, so the agent does not plan around them; the Read list refuses a call that arrives (`beforeTool`).
-        ...readListRefusals(),
+        // Not offered, so the agent does not plan around them; a Read list refuses a call that arrives (`beforeTool`).
+        ...toolRefusals(),
         ...run.deny,
       ],
       systemPrompt: {
@@ -1713,7 +1722,7 @@ export class AgentRuntime implements OnModuleDestroy {
         summary: stepText(input.tool_name, toolInput),
       });
       const refusal =
-        cloudWatchDenial(input.tool_name) ?? hostedLogDenial(input.tool_name) ?? readListDenial(input.tool_name);
+        cloudWatchDenial(input.tool_name) ?? hostedLogDenial(input.tool_name) ?? toolRefusal(input.tool_name);
       if (refusal !== null) {
         this.steps.finish(input.tool_use_id, { ok: false, error: refusal });
         return {
@@ -1724,6 +1733,22 @@ export class AgentRuntime implements OnModuleDestroy {
           },
         };
       }
+      // A job, or a pull request's Session, reads text the operator did not write: a server with classes is out of reach
+      // under any name it can carry, which `deniedMcpServers` (exact names) cannot say.
+      if (isClassedTool(input.tool_name) && !isOperatorChat(run)) {
+        const reason =
+          'This service is not available in this run: a job or a pull request reads text the operator did not write.';
+        this.steps.finish(input.tool_use_id, { ok: false, error: reason });
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: reason,
+          },
+        };
+      }
+      const classed = toolAsk(input.tool_name);
+      if (classed) return this.askClassedTool(run, classed, toolInput, input.tool_use_id);
       if (input.tool_name === OPEN_PULL_REQUEST_TOOL) return this.checkPullRequest(run, toolInput, input.tool_use_id);
       const round = run.prAction === null ? undefined : prActionOfTool(input.tool_name);
       if (round !== undefined) {
@@ -2160,6 +2185,33 @@ export class AgentRuntime implements OnModuleDestroy {
     };
   }
 
+  /**
+   * A tool of a server with Tool classes that is not a read: a write asks in every Access mode but full, a delete and a
+   * tool no list names in every mode. Each call is a row before it runs, holding the capped summary and no page content.
+   */
+  private askClassedTool(
+    run: Run,
+    ask: ToolAsk,
+    toolInput: Record<string, unknown>,
+    stepId: string,
+  ): Promise<HookJSONOutput> {
+    const what = askSummary(ask, toolInput);
+    return this.askLogged(
+      run,
+      stepId,
+      `${ask.service}: ${what}`,
+      ActionKind.Query,
+      ask.service,
+      what,
+      false,
+      {
+        yes: `The operator allowed this ${ask.service} call.`,
+        no: 'The operator denied this. Do not retry it another way.',
+      },
+      ask.destructive,
+    );
+  }
+
   /** A browser or process tool that asks for nothing: a loopback page or the Session's own process. Each call is a row. */
   private allowLogged(
     run: Run,
@@ -2266,6 +2318,7 @@ export class AgentRuntime implements OnModuleDestroy {
     command: string,
     isProd: boolean,
     reasons: { yes: string; no: string },
+    always = false,
   ): Promise<HookJSONOutput> {
     const row = this.actionLog.start({ sessionId: run.sessionId, kind, target, command, isProd });
     run.toolRows.set(stepId, row);
@@ -2273,6 +2326,7 @@ export class AgentRuntime implements OnModuleDestroy {
       run,
       { actionLogId: row, sessionId: run.sessionId, kind: ApprovalKind.Command, summary, isProd },
       stepId,
+      always,
     );
     const approved = decision === ApprovalStatus.Approved;
     if (!approved) this.steps.finish(stepId, { ok: false, error: 'denied by the operator' });
@@ -2302,10 +2356,18 @@ export class AgentRuntime implements OnModuleDestroy {
     return text;
   }
 
-  private async ask(run: Run, request: ApprovalRequest, stepId: string | null = null): Promise<Decision> {
-    // Full access asks about nothing but a PROD write: the console's own tools (integration writes, Repo moves, saved
-    // files, processes, page scripts, spawned Sessions) run at once. Merge, sign-in and sandbox refusals still hold.
-    if (run.accessMode === AccessMode.Full && !request.isProd) return ApprovalStatus.Approved;
+  /**
+   * Full access asks about nothing but a PROD write: the console's own tools (integration writes, Repo moves, saved
+   * files, processes, page scripts, spawned Sessions) run at once. Merge, sign-in and sandbox refusals still hold.
+   * `always` asks in full access too: a delete in a service outside this Mac.
+   */
+  private async ask(
+    run: Run,
+    request: ApprovalRequest,
+    stepId: string | null = null,
+    always = false,
+  ): Promise<Decision> {
+    if (run.accessMode === AccessMode.Full && !request.isProd && !always) return ApprovalStatus.Approved;
     const since = Date.now();
     run.waitingSince ??= since;
     run.waits++;

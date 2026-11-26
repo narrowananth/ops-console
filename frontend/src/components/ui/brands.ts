@@ -180,6 +180,18 @@ export const BRANDS = {
     // Three log lines, each with a dot: drawn here, not a third-party logo.
     path: 'M4.6 4.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 4.8h12v2.4h-12zM4.6 10.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 10.8h8v2.4h-8zM4.6 16.4a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 1 1 0-3.2zM8.5 16.8h10v2.4h-10z',
   },
+  shortcut: {
+    title: 'Shortcut',
+    hex: '#58B1E4',
+    // An S of three bars, drawn here, not a third-party logo.
+    path: 'M4 4h16v4H8v2h12v10H4v-4h12v-2H4z',
+  },
+  render: {
+    title: 'Render',
+    hex: '#4353FF',
+    // An R of blocks, drawn here, not a third-party logo.
+    path: 'M5 4h3v16H5zM8 4h9v3H8zM16 7h3v4h-3zM8 11h9v3H8zM12.5 14h3.5l3 6h-3.5z',
+  },
   newrelic: {
     title: 'New Relic logs',
     hex: '#1CE783',

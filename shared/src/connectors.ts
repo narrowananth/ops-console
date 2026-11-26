@@ -25,6 +25,12 @@ export enum ConnectorId {
   NewRelicLogs = 'new_relic_logs',
   /** Figma's designs, read through its hosted MCP server. Read only: the console refuses every tool off the Read list. */
   Figma = 'figma',
+  /** Notion's pages and databases, through its hosted MCP server. Its tools are sorted into Tool classes: a change asks, a delete always asks. */
+  Notion = 'notion',
+  /** Shortcut's stories, epics and iterations, through its hosted MCP server. Its tool names are unpublished, so the Tool classes are a rule on the words of the name. */
+  Shortcut = 'shortcut',
+  /** Render's services, deploys, logs and databases, through its hosted MCP server and an API key the operator pastes. Tool classes as Notion's. */
+  Render = 'render',
 }
 
 export const CONNECTOR_ORDER: ConnectorId[] = Object.values(ConnectorId);
@@ -66,6 +72,9 @@ export const CONNECTOR_NAMES: Record<ConnectorId, string> = {
   [ConnectorId.LokiLogs]: 'Loki logs',
   [ConnectorId.NewRelicLogs]: 'New Relic logs',
   [ConnectorId.Figma]: 'Figma',
+  [ConnectorId.Notion]: 'Notion',
+  [ConnectorId.Shortcut]: 'Shortcut',
+  [ConnectorId.Render]: 'Render',
 };
 
 /** How the console reaches the service (ADR 0005). */
@@ -87,6 +96,9 @@ export const CONNECTOR_VIA: Record<ConnectorId, string> = {
   [ConnectorId.LokiLogs]: 'Grafana Cloud MCP',
   [ConnectorId.NewRelicLogs]: 'New Relic MCP',
   [ConnectorId.Figma]: 'Figma MCP',
+  [ConnectorId.Notion]: 'Notion MCP',
+  [ConnectorId.Shortcut]: 'Shortcut MCP',
+  [ConnectorId.Render]: 'Render MCP',
 };
 
 /**
@@ -148,6 +160,18 @@ export const CONNECTOR_SERVERS: Partial<
   [ConnectorId.NewRelicLogs]: { name: 'newrelic', transport: McpTransport.Http, target: NEW_RELIC_MCP_URLS.US },
   // Figma's hosted server. It takes the sign-in of Claude Code's own client, so none is pinned here.
   [ConnectorId.Figma]: { name: 'figma', transport: McpTransport.Http, target: 'https://mcp.figma.com/mcp' },
+  // Notion's hosted server registers its own OAuth client (dynamic client registration), so none is pinned here.
+  [ConnectorId.Notion]: { name: 'notion', transport: McpTransport.Http, target: 'https://mcp.notion.com/mcp' },
+  // Shortcut's hosted server takes the sign-in of Claude Code's own client, so none is pinned here.
+  [ConnectorId.Shortcut]: { name: 'shortcut', transport: McpTransport.Http, target: 'https://mcp.shortcut.com/mcp' },
+  // Render's hosted server signs in with an API key header. `mcp-remote` bridges stdio to it and expands `${RENDER_AUTH}`
+  // from its own environment, so the key (`Bearer <key>`) stays in the Keychain and reaches only that process.
+  [ConnectorId.Render]: {
+    name: 'render',
+    transport: McpTransport.Stdio,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: mcp-remote's own variable reference, not a template
+    target: 'npx -y mcp-remote https://mcp.render.com/mcp --header Authorization:${RENDER_AUTH}',
+  },
   // AWS Labs' CloudWatch server. The Connector registers it with its profile and region in the environment.
   [ConnectorId.CloudWatchLogs]: {
     name: 'cloudwatch',
@@ -268,6 +292,9 @@ export const connectorConfigSchemas = {
     reports_folder: z.string().min(1),
   }),
   [ConnectorId.Figma]: z.strictObject({}),
+  [ConnectorId.Notion]: z.strictObject({}),
+  [ConnectorId.Shortcut]: z.strictObject({}),
+  [ConnectorId.Render]: z.strictObject({}),
 } satisfies Record<ConnectorId, z.ZodType>;
 
 export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknown>> = {
@@ -343,6 +370,9 @@ export const DEFAULT_CONNECTOR_CONFIG: Record<ConnectorId, Record<string, unknow
     reports_folder: 'reports',
   },
   [ConnectorId.Figma]: {},
+  [ConnectorId.Notion]: {},
+  [ConnectorId.Shortcut]: {},
+  [ConnectorId.Render]: {},
 };
 
 /**
@@ -354,7 +384,10 @@ export const connectBodySchema = z.object({
   region: z.string().optional(),
   /** New Relic: the account to read, when the sign-in can read several. */
   account_id: z.string().optional(),
-  /** New Relic: a User API key to read through New Relic's API, in place of the MCP sign-in. It goes to the Keychain. */
+  /**
+   * New Relic: a User API key to read through New Relic's API, in place of the MCP sign-in. Render: its API key, which
+   * Connect requires. Either goes to the Keychain.
+   */
   api_key: z.string().trim().min(1).max(200).optional(),
   /** Loki: the data source to read, when the stack has several. */
   datasource_uid: z.string().optional(),

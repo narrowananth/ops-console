@@ -386,6 +386,27 @@
       "when": 1795689115456,
       "tag": "0054_connector_figma",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1795704622496,
+      "tag": "0055_connector_notion",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1795707154754,
+      "tag": "0056_connector_shortcut",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1795708027745,
+      "tag": "0057_connector_render",
+      "breakpoints": true
     }
   ]
 }

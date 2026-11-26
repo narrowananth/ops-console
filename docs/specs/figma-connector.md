@@ -19,17 +19,25 @@ mapping saved.
 2. Connect takes no body. It registers the `figma` MCP Server at Figma's hosted address in every account if it is missing,
    turns it on if it was turned off, and starts the browser sign-in through Claude Code in the active account. The operator
    types nothing in the console. The Connector's status follows the server's.
-3. A Session's own runs (the operator's messages) can call the Figma tools on the read list: `get_design_context`,
-   `get_screenshot`, `get_metadata`, `get_variable_defs`, `get_figjam`, `get_comments`, `get_code_connect_map`,
-   `get_code_connect_suggestions`, `get_context_for_code_connect`, `get_libraries`, `search_design_system`,
-   `get_motion_context`, `get_shader`, `list_shaders`, `list_file_shaders`, `get_generative_plugin`,
-   `list_generative_plugins`, `download_assets`, `export_video` and `whoami`.
+3. A Session's own runs (the operator's messages) can call the Figma tools on the read list, 29 in all:
+   - Figma files: `get_design_context`, `get_screenshot`, `get_metadata`, `get_variable_defs`, `get_figjam`,
+     `get_comments`, `get_code_connect_map`, `get_code_connect_suggestions`, `get_context_for_code_connect`,
+     `get_libraries`, `search_design_system`, `get_motion_context`, `get_shader`, `list_shaders`, `list_file_shaders`,
+     `get_generative_plugin`, `list_generative_plugins`, `download_assets`, `export_video` and `whoami`.
+   - `create_session`, which Figma's server tells an agent to call before the first file tool, reads included. It records
+     the work at Figma's service and changes no design. The operator allowed it; it is the one tool on the list that
+     stores anything at Figma.
+   - Weave, Figma's workflow product, reads: `weave_find_model`, `weave_get_model_run_output`, `weave_get_node_catalog`,
+     `weave_get_tool_inputs`, `weave_get_tool_run_output`, `weave_get_workflow`, `weave_list_tools` and
+     `weave_search_workspace`.
 4. A call to any other tool of the Figma server is refused before it runs, in every Access mode, `full` included. No
    Approval is raised. The agent is told Figma is read only here and that nothing was changed. This holds for the tools that
    write today (`use_figma`, `generate_figma_design`, `html_to_figma`, `send_code_to_figma`, `upload_assets`,
-   `add_code_connect_map`, `send_code_connect_mappings`, `create_new_file`, `generate_diagram`, `generate_image`,
-   `generate_vector_illustration`, and the plugin and shader create and update tools) and for any tool Figma adds later,
-   until the read list names it.
+   `add_code_connect_map`, `send_code_connect_mappings`, `create_new_file`, `create_branch`, `generate_diagram`,
+   `generate_image`, `generate_vector_illustration`, the plugin and shader create and update tools, and Weave's
+   `weave_build_workflow`, `weave_run_tool`, `weave_run_model`, `weave_upload_asset`, `weave_cancel_tool_run` and
+   `weave_request_report`, which build, spend credits or store things) and for any tool Figma adds later, until the read
+   list names it.
 5. The agent is told, in the Session's instructions, that Figma is read only and which tools it has, and what to do when
    Figma refuses a call (behavior 9).
 6. The refused tools are not offered to the agent at all when the run starts, so it does not plan around them. A call that
