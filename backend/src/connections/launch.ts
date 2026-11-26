@@ -93,12 +93,12 @@ function firebasePing(config: Record<string, unknown>, services: FirebaseService
   const project = str(config, 'project_id');
   if (services.includes(FirebaseService.RealtimeDatabase)) {
     // Without `databaseUrl`, `firebase mcp` builds the address with a path import it never resolves and throws
-    // "Cannot read properties of undefined (reading 'join')". This is the default address it would have used.
+    // "Cannot read properties of undefined (reading 'join')". Failing that, the project's default address is read.
     return {
       tool: 'realtimedatabase_get_data',
       args: {
         path: '/ops-console-ping',
-        databaseUrl: `https://${project}-default-rtdb.us-central1.firebasedatabase.app`,
+        databaseUrl: str(config, 'database_url') || `https://${project}-default-rtdb.us-central1.firebasedatabase.app`,
       },
     };
   }

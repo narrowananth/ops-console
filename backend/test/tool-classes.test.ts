@@ -104,6 +104,10 @@ describe('the Read list of the Figma server (read only)', () => {
     expect(note).toMatch(/Figma is read only here/);
     for (const tool of FIGMA_READS) expect(note).toContain(`mcp__figma__${tool}`);
   });
+
+  it('tells the agent to name the account and seat with whoami when Figma refuses a call', () => {
+    expect(toolNote('figma')).toMatch(/refuses a call.*mcp__figma__whoami.*account, plan, tier and seat/);
+  });
 });
 
 const NOTION_READS = [

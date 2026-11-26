@@ -18,6 +18,8 @@ type ToolClasses = {
   alias: RegExp;
   reads: string[];
   writes: string[];
+  /** What the agent does when the vendor refuses a call, told with the note. */
+  onRefusal?: string;
 } & ({ policy: 'read-only' } | { policy: 'ask'; destructive: string[] });
 
 const serverOf = (id: ConnectorId): string => (CONNECTOR_SERVERS[id] as { name: string }).name;
@@ -82,6 +84,8 @@ const CLASSES: Record<string, ToolClasses> = {
       'weave_cancel_tool_run',
       'weave_request_report',
     ],
+    onRefusal:
+      'If Figma refuses a call (no edit access, a plan or seat without access, a rate limit), call mcp__figma__whoami once and tell the operator the account, plan, tier and seat it reports, and that Starter plans get no calls and View and Collab seats 20 a month. Do not retry the refused call.',
   },
   [serverOf(ConnectorId.Notion)]: {
     service: 'Notion',
@@ -174,7 +178,7 @@ export function toolNote(server: string): string {
   const names = (tools: string[]) => tools.map((tool) => full(server, tool)).join(', ');
   const reads = `Read it with ${names(classes.reads)}.`;
   if (classes.policy === 'read-only') {
-    return `${classes.service} is read only here. ${reads} Any other ${classes.service} tool is refused and changes nothing.`;
+    return `${classes.service} is read only here. ${reads} Any other ${classes.service} tool is refused and changes nothing.${classes.onRefusal ? ` ${classes.onRefusal}` : ''}`;
   }
   return [
     `${classes.service} can be read and changed. ${reads}`,

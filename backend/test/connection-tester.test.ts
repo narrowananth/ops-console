@@ -28,6 +28,31 @@ describe('McpConnectionTester', () => {
   });
 });
 
+describe('McpConnectionTester answers', () => {
+  async function serverAnswering(text: string) {
+    const script = path.join(await tempDir(), 'server.mjs');
+    await writeFile(
+      script,
+      `import { McpServer } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/mcp.js'))};
+import { StdioServerTransport } from ${JSON.stringify(import.meta.resolve('@modelcontextprotocol/sdk/server/stdio.js'))};
+const server = new McpServer({ name: 'fake', version: '1.0.0' });
+server.registerTool('read', {}, () => ({ content: [{ type: 'text', text: ${JSON.stringify(text)} }] }));
+await server.connect(new StdioServerTransport());`,
+    );
+    return { target: `${process.execPath} ${script}`, env: {}, ping: { tool: 'read', args: {} } };
+  }
+
+  it('fails a Firebase read that answers only an error, as the missing database does, and passes a null read', async () => {
+    const missing = await new McpConnectionTester('test').run(
+      ConnectionType.Firebase,
+      await serverAnswering('{\n  "error" : "404 Not Found"\n}\n'),
+    );
+    expect(missing).toMatchObject({ status: HealthStatus.Fail, detail: '404 Not Found' });
+    const empty = await new McpConnectionTester('test').run(ConnectionType.Firebase, await serverAnswering('null'));
+    expect(empty.status).toBe(HealthStatus.Ok);
+  });
+});
+
 describe('McpConnectionTester pool', () => {
   /** A server that counts its starts in a file, and answers `ping` with a pid. */
   async function counting() {

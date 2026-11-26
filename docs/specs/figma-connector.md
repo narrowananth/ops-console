@@ -38,7 +38,8 @@ mapping saved.
    `weave_build_workflow`, `weave_run_tool`, `weave_run_model`, `weave_upload_asset`, `weave_cancel_tool_run` and
    `weave_request_report`, which build, spend credits or store things) and for any tool Figma adds later, until the read
    list names it.
-5. The agent is told, in the Session's instructions, that Figma is read only and which tools it has.
+5. The agent is told, in the Session's instructions, that Figma is read only and which tools it has, and what to do when
+   Figma refuses a call (behavior 9).
 6. The refused tools are not offered to the agent at all when the run starts, so it does not plan around them. A call that
    still arrives is refused as in 4.
 7. A job the console starts (Verify, Fix, a pull request review, reply or comment pass, Open pull request) does not reach
@@ -47,7 +48,8 @@ mapping saved.
 8. Each Figma call shows in the Session as a step naming the tool, as other MCP tools do.
 9. Figma may refuse a call: no seat that allows it, a plan without access, a rate limit (Professional seats get 200 calls a
    day and 10 a minute; View and Collab seats 20 a month; Starter plans none). The agent receives Figma's own message and the
-   Connector's status does not change. The pane says what the plans allow.
+   Connector's status does not change. The agent calls `whoami` once, tells the operator the account, plan, tier and seat it
+   reports and what that seat gets, and does not retry the call. The pane says what the plans allow.
 10. A sign-in that Figma refuses for the console's client (Figma accepts only clients on its MCP catalog) leaves the status
     `auth` with Figma's reason, and the pane says so. The console does not present itself as another client.
 11. A sign-in the operator does not finish within 5 minutes is stopped and reads `auth`. Cancel stops one that waits.
