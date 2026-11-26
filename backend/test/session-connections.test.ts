@@ -511,6 +511,37 @@ describe('run options', () => {
 });
 
 describe('queries in an anonymous Session', () => {
+  it('tells the agent the Realtime Database address of a ticked Firebase Connection, or that none is set', async () => {
+    const daemon = await start();
+    // A made-up key: the fields Firebase reads, no real private key.
+    const secret = JSON.stringify({
+      type: 'service_account',
+      project_id: 'shop-123',
+      client_email: 'reader@shop-123.iam.gserviceaccount.example.com',
+      private_key: '-----BEGIN PRIVATE KEY-----\nnot-a-key\n-----END PRIVATE KEY-----\n',
+    });
+    const base = { type: 'firebase', env: 'dev', secret };
+    const named = await connect(daemon, {
+      ...base,
+      name: 'shop-fb',
+      config: {
+        project_id: 'shop-123',
+        services: ['realtime_database'],
+        database_url: 'https://shop-test-db.firebaseio.com',
+      },
+    });
+    const bare = await connect(daemon, {
+      ...base,
+      name: 'shop-fb-bare',
+      config: { project_id: 'shop-123', services: ['realtime_database'] },
+    });
+    const session = await newSession(daemon, { connection_ids: [named.id, bare.id] });
+    await ask(daemon, session.id, { text: 'one' });
+    expect(append(daemon)).toContain('always pass databaseUrl');
+    expect(append(daemon)).toContain('shop-fb: https://shop-test-db.firebaseio.com');
+    expect(append(daemon)).toContain('shop-fb-bare: none set, so ask the operator for it');
+  });
+
   it('logs a query before it runs and names the Connection and its Access Level in a step', async () => {
     const daemon = await start();
     const mongo = await connect(daemon, MONGO_PROD);

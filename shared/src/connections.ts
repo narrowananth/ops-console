@@ -77,6 +77,8 @@ export const connectionConfigSchemas = {
   [ConnectionType.Firebase]: z.strictObject({
     project_id: z.string().min(1),
     services: z.array(firebaseService).min(1),
+    /** The Realtime Database's own address, when it is not the project's default one. */
+    database_url: z.url().optional(),
   }),
   [ConnectionType.Kafka]: z.strictObject({
     bootstrap_servers: z.string().min(1),

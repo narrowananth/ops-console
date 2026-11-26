@@ -1,6 +1,13 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { AccessLevel, ConnectionEnv, ErrorCode, RunPurpose, type SessionPatch } from '@ops-console/shared';
+import {
+  AccessLevel,
+  ConnectionEnv,
+  ConnectionType,
+  ErrorCode,
+  RunPurpose,
+  type SessionPatch,
+} from '@ops-console/shared';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { ApiError, validationFailed } from '../common/errors';
 import { connections, repos, sessionConnections } from '../db/schema';
@@ -158,7 +165,18 @@ export class ConnectionScopes {
       .filter((row) => named.has(row.id) && row.access !== AccessLevel.None);
     if (rows.length === 0) return null;
     const list = rows.map((row) => `${labelOf(row)}${row.env === ConnectionEnv.Prod ? ' PROD' : ''}`).join(', ');
-    return `This Session has these Connections, each an MCP server you have: ${list}. Only read unless the operator asks for a change.
+    const databases = rows
+      .filter((row) => row.type === ConnectionType.Firebase)
+      .map((row) => {
+        const url = (JSON.parse(row.config) as { database_url?: string }).database_url;
+        return url ? `${row.name}: ${url}` : `${row.name}: none set, so ask the operator for it`;
+      });
+    // `realtimedatabase_get_data` throws without `databaseUrl`, and answers a wrong one with `{"error": "404 Not Found"}`.
+    const firebase =
+      databases.length === 0
+        ? ''
+        : `\n\nFor a Firebase Connection's realtimedatabase_get_data, always pass databaseUrl, the Realtime Database address (${databases.join('; ')}).`;
+    return `This Session has these Connections, each an MCP server you have: ${list}. Only read unless the operator asks for a change.${firebase}
 
 ${RESULT_BLOCK}
 ${COMPARE_BLOCK}

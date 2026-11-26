@@ -67,6 +67,12 @@ export const FIELDS: Record<ConnectionType, Field[]> = {
       kind: 'list',
       placeholder: 'realtime_database, firestore, auth, storage',
     },
+    {
+      key: 'database_url',
+      label: 'Realtime Database URL (optional)',
+      kind: 'text',
+      placeholder: 'https://my-project-default-rtdb.firebaseio.com',
+    },
   ],
   [ConnectionType.Kafka]: [
     { key: 'bootstrap_servers', label: 'Bootstrap servers', kind: 'text' },
