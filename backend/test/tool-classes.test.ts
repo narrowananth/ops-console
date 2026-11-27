@@ -442,6 +442,40 @@ describe('which tools belong to a server with classes', () => {
   });
 });
 
+/** The tools Shortcut's hosted server offers, as its MCP server listed them. */
+const SHORTCUT_REAL = {
+  read: `get_current_iterations get_doc get_epic get_file get_iteration get_member get_objective get_project get_story
+    get_story_history get_team get_upcoming_iterations get_whoami get_workflow list_custom_fields list_docs
+    list_epic_comment_replies list_epic_comments list_epic_stories list_epics list_iteration_stories list_iterations
+    list_label_stories list_labels list_members list_objectives list_project_stories list_projects list_stories
+    list_story_comments list_teams list_workflow_states list_workflows read_file search_docs search_epics
+    search_iterations search_objectives search_stories`.split(/\s+/),
+  write: `create_doc create_epic create_epic_comment create_iteration create_label create_story
+    create_story_checklist_item create_story_comment create_story_link update_doc update_epic update_iteration
+    update_story update_story_checklist_item`.split(/\s+/),
+  destructive: ['delete_epic', 'delete_iteration', 'delete_workspace_token'],
+  // A read of the workspace's tokens: it asks, since `tokens` is no noun the rule trusts.
+  asksAsRead: ['list_workspace_tokens'],
+};
+
+describe('the tool classes of the Shortcut server against the names its hosted server offers', () => {
+  it('runs every read, asks about every create and update, and always asks about every delete', () => {
+    for (const tool of SHORTCUT_REAL.read) expect(toolAsk(`mcp__shortcut__${tool}`), tool).toBeNull();
+    for (const tool of SHORTCUT_REAL.write) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: false });
+    }
+    for (const tool of SHORTCUT_REAL.destructive) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: true });
+    }
+  });
+
+  it('asks about a read of the workspace tokens, as an unknown word', () => {
+    for (const tool of SHORTCUT_REAL.asksAsRead) {
+      expect(toolAsk(`mcp__shortcut__${tool}`), tool).toEqual({ service: 'Shortcut', tool, destructive: true });
+    }
+  });
+});
+
 describe('the tool classes of the Render server (ask, by lists)', () => {
   it('lets a read through, workflow reads and select_workspace included, and asks about nothing', () => {
     for (const tool of RENDER_READS) {

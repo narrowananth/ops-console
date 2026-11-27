@@ -1,7 +1,7 @@
 # Shortcut Connector
 
 **Status:** shipped
-**Open:** the hosted server's tool names are unpublished, so the word rule is checked against the archived server's names only, and no real sign-in, read or write ran.
+**Open:** the rule is checked against the 59 tool names Shortcut's hosted server listed (reads, creates, updates and deletes all class as expected; `list_workspace_tokens` asks as a read of tokens on purpose). No real sign-in, read or write ran.
 **Design:** the Connector pane of Integrations (`design/ops-console.html`), as for Notion and Sentry: a numbered sign-in step and Disconnect. The Approval card is the existing one.
 
 ## Problem

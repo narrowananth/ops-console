@@ -1,4 +1,4 @@
-import { type AlertListItem, AlertStatus, SCAN_RANGES, ScanWindow } from '@ops-console/shared';
+import { type AlertListItem, SCAN_RANGES, ScanWindow } from '@ops-console/shared';
 import { useState } from 'react';
 
 const RANGE_KEY = 'ops-console-monitor-range';
@@ -26,12 +26,13 @@ export type ScanScope = {
 };
 
 /**
- * Whether the Monitor lists an Alert. One with no HTTP status code came from before Scans read codes: it shows only
- * while the operator is working on it. Any other shows when its code is in the pick, or the pick is every code.
+ * Whether the Monitor lists an Alert: when its HTTP status code is in the pick, or the pick is every code. An Alert with
+ * no code (a log read by its error level alone, or one stored before Scans read codes) has none of a pick, so it shows
+ * only while every code is picked.
  */
-export function shown(alert: Pick<AlertListItem, 'http_status' | 'status'>, codes: number[] = []): boolean {
-  if (alert.http_status === null) return alert.status !== AlertStatus.Open;
-  return codes.length === 0 || codes.includes(alert.http_status);
+export function shown(alert: Pick<AlertListItem, 'http_status'>, codes: number[] = []): boolean {
+  if (codes.length === 0) return true;
+  return alert.http_status !== null && codes.includes(alert.http_status);
 }
 
 /** The range and HTTP status codes the Monitor lists Services for and scans, in every env; kept across reloads. */

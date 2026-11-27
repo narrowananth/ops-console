@@ -135,6 +135,112 @@ test('Services show tick boxes on hover, count ticks above the list, and Scan re
   await expect(page.locator('strong', { hasText: `${NAMES.length} ticked` })).toBeVisible();
 });
 
+/** Datadog and New Relic both connected; each lists its own Services, and an Alert with no status code is New Relic's. */
+async function routeTwoSources(page: Page) {
+  const connector = (id: string, name: string) => ({
+    id,
+    name,
+    via: 'x',
+    status: 'ok',
+    status_detail: null,
+    account_label: null,
+    login: null,
+    config: {},
+    last_checked_at: ago(1),
+    sign_in: null,
+    pick: null,
+  });
+  await page.route('**/api/connectors', (route) =>
+    route.fulfill(list([connector('datadog', 'Datadog'), connector('new_relic_logs', 'New Relic logs')])),
+  );
+  await page.route('**/api/services', (route) => route.fulfill(list([])));
+  await page.route(/\/api\/scans(\?.*)?$/, (route) =>
+    route.fulfill(route.request().method() === 'POST' ? { status: 202, json: { data: { id: 's9' } } } : list([])),
+  );
+  await page.route(/\/api\/alerts(\?.*)?$/, (route) =>
+    route.fulfill(
+      list([
+        alertOf('d1', 'high', '/v1/orders', {
+          service: { id: 'sv1', name: 'shopify-auth-proxy', env: 'prod', repo_id: null, repo_url: null },
+        }),
+        // An error log with no HTTP status code: a New Relic Alert of the Service (no service).
+        alertOf('n1', 'high', '/none', {
+          connector: 'new_relic_logs',
+          http_status: null,
+          route: null,
+          title: 'test.error_log failing on (no service)',
+          log_line: 'test.error_log',
+          service: { id: 'sv2', name: '(no service)', env: 'prod', repo_id: null, repo_url: null },
+        }),
+      ]),
+    ),
+  );
+  await page.route(/\/api\/monitor\/log-services/, (route) => {
+    const nr = new URL(route.request().url()).searchParams.get('connector') === 'new_relic_logs';
+    return route.fulfill(
+      list(
+        nr
+          ? [{ name: '(no service)', envs: ['prod'], errors: 1 }]
+          : [{ name: 'shopify-auth-proxy', envs: ['prod'], errors: 40 }],
+      ),
+    );
+  });
+  await page.route(/\/api\/monitor\/status-codes/, (route) =>
+    route.fulfill(
+      list([
+        { code: 500, count: 3 },
+        { code: 404, count: 1 },
+      ]),
+    ),
+  );
+}
+
+test('a picked Service is cleared by the Show every Service button and by a click on another source tab', async ({
+  page,
+}) => {
+  await routeTwoSources(page);
+  await page.goto(`${daemon.url}/monitor?service=shopify-auth-proxy#token=${daemon.token}`);
+  const logs = page.getByRole('table', { name: 'Logs' });
+  await expect(page.getByRole('button', { name: /^Scan shopify-auth-proxy/ })).toBeVisible();
+  await expect(logs.getByRole('button', { name: /\/v1\/orders/ })).toBeVisible();
+
+  // The pick has a button of its own; clearing it reads every listed Service again.
+  await page.getByRole('button', { name: 'Show every Service' }).click();
+  await expect(page).not.toHaveURL(/service=/);
+  await expect(page.getByRole('button', { name: /^Scan \d+ Services/ })).toBeVisible();
+
+  // Picked again, a click on the New Relic tab leaves it behind: New Relic lists its own Services.
+  await page.goto(`${daemon.url}/monitor?service=shopify-auth-proxy#token=${daemon.token}`);
+  await expect(page.getByRole('button', { name: /^Scan shopify-auth-proxy/ })).toBeVisible();
+  await page.getByRole('tab', { name: 'New Relic' }).click();
+  await expect(page).not.toHaveURL(/service=/);
+  await expect(page.getByText(/No logs from shopify-auth-proxy/)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Scan 1 Services?/ })).toBeVisible();
+  // The tab already open keeps a pick made there.
+  await openServices(page);
+  await page
+    .getByRole('list', { name: 'Services' })
+    .getByRole('button', { name: /\(no service\)/ })
+    .click();
+  await expect(page).toHaveURL(/service=%28no\+service%29|service=\(no(\+|%20)service\)/);
+  await page.getByRole('tab', { name: 'New Relic' }).click();
+  await expect(page).toHaveURL(/service=/);
+});
+
+test('an Alert with no status code is listed while no codes are picked, and not once codes are', async ({ page }) => {
+  await routeTwoSources(page);
+  await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
+  await page.getByRole('tab', { name: 'New Relic' }).click();
+  const logs = page.getByRole('table', { name: 'Logs' });
+  await expect(logs.getByRole('button', { name: /\(no service\)|test\.error_log/ })).toBeVisible();
+  await expect(page.getByText('No open Alerts')).toHaveCount(0);
+  // Once codes are picked, an Alert with none of them leaves the list.
+  await page.getByRole('button', { name: 'Status', exact: true }).click();
+  await page.getByRole('group', { name: 'HTTP status codes to read' }).getByRole('checkbox', { name: /404/ }).uncheck();
+  await page.keyboard.press('Escape');
+  await expect(logs.getByRole('button', { name: /test\.error_log/ })).toHaveCount(0);
+});
+
 test('the last Scan is one line with no Service list to open', async ({ page }) => {
   await routeMonitor(page);
   await page.goto(`${daemon.url}/monitor#token=${daemon.token}`);
