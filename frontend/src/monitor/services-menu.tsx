@@ -96,7 +96,7 @@ export function ServicesMenu({
   const box = `absolute top-2.5 left-2.5 z-1 size-3.5 cursor-pointer accent-accent focus-visible:opacity-100 ${toScan.length > 0 ? '' : 'opacity-0 group-hover:opacity-100'}`;
 
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-1">
       {open && (
         <button
           type="button"
@@ -137,6 +137,17 @@ export function ServicesMenu({
           ▾
         </span>
       </button>
+      {selected !== null && (
+        <button
+          type="button"
+          aria-label="Show every Service"
+          title={`Showing only ${selected}. Show every Service again.`}
+          onClick={() => onSelect(null)}
+          className="flex size-6 flex-none cursor-pointer items-center justify-center rounded-full border border-line bg-card text-[11px] leading-none text-neutral-700 hover:border-neutral-400 hover:text-text"
+        >
+          ✕
+        </button>
+      )}
       {open && (
         <div
           className={`absolute top-full right-0 z-51 mt-1 flex max-h-110 w-88 max-w-[calc(100vw-96px)] flex-col ${menu}`}

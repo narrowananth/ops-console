@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { type NewRelicRoute, NO_ENV, type Sample, type ScanWindow, WINDOW_HOURS } from '@ops-console/shared';
+import {
+  type NewRelicRoute,
+  NO_ENV,
+  NO_SERVICE,
+  type Sample,
+  type ScanWindow,
+  WINDOW_HOURS,
+} from '@ops-console/shared';
 import { z } from 'zod';
 import { mapLimit } from '../common/map-limit';
 import { HostedAuthError, readFailure } from '../connectors/hosted-mcp';
@@ -134,6 +141,9 @@ function facetValues(row: Row, facets: string[]): unknown[] {
 /** The env a facet value names: none for an event with no env attribute. */
 const envOf = (value: unknown): string => (typeof value === 'string' && value !== '' ? value : NO_ENV);
 
+/** The Service a facet value names: an event with no service attribute is the Service `(no service)`. */
+const serviceOf = (value: unknown): string => (typeof value === 'string' && value !== '' ? value : NO_SERVICE);
+
 type ServiceKey = { name: string; env: string };
 
 /**
@@ -232,9 +242,7 @@ export class NewRelicLogs implements LogReader {
         );
         return groups.length > 0 ? { name: service.name, env: service.env, groups, repoUrl: null } : null;
       });
-      if ((await this.attributes(run, minutes)).size === 0) {
-        request.note?.(`New Relic logs: no Services found under the attribute ${SERVICE_ATTRIBUTE}`);
-      }
+      if ((await this.attributes(run, minutes)).size === 0) request.note?.('New Relic logs: no logs in this window');
       return readings
         .flatMap((reading) => (reading ? [reading] : []))
         .sort((a, b) => a.name.localeCompare(b.name) || a.env.localeCompare(b.env));
@@ -244,7 +252,7 @@ export class NewRelicLogs implements LogReader {
   async envs(): Promise<string[]> {
     return this.within(async (run) => {
       const rows = await run(
-        `SELECT count(*) FROM Log ${where(`${name(SERVICE_ATTRIBUTE)} IS NOT NULL`)} FACET ${name(ENV_ATTRIBUTE)} LIMIT MAX ${since(ENV_WINDOW_MINUTES)}`,
+        `SELECT count(*) FROM Log FACET ${name(ENV_ATTRIBUTE)} LIMIT MAX ${since(ENV_WINDOW_MINUTES)}`,
       );
       // Events with no env are their own choice in the Scan, not an env to list.
       return [...new Set(rows.map((row) => envOf(facetValues(row, [ENV_ATTRIBUTE])[0])))]
@@ -267,9 +275,7 @@ export class NewRelicLogs implements LogReader {
       return rows.flatMap((row): ServiceCount[] => {
         const [service, env] = facetValues(row, [SERVICE_ATTRIBUTE, ENV_ATTRIBUTE]);
         const errors = Number(row.count ?? 0);
-        return typeof service === 'string' && envs.includes(envOf(env)) && errors > 0
-          ? [{ name: service, env: envOf(env), errors }]
-          : [];
+        return envs.includes(envOf(env)) && errors > 0 ? [{ name: serviceOf(service), env: envOf(env), errors }] : [];
       });
     });
   }
@@ -326,17 +332,18 @@ export class NewRelicLogs implements LogReader {
   /** `(service attribute) = 'name' AND (env attribute) = 'env'`; an env of `no env` is an event with none. */
   private scope(service: ServiceKey): string {
     const env = name(ENV_ATTRIBUTE);
+    const attribute = name(SERVICE_ATTRIBUTE);
     return [
-      `${name(SERVICE_ATTRIBUTE)} = ${text(service.name)}`,
+      service.name === NO_SERVICE
+        ? `(${attribute} IS NULL OR ${attribute} = '')`
+        : `${attribute} = ${text(service.name)}`,
       service.env === NO_ENV ? `(${env} IS NULL OR ${env} = '')` : `${env} = ${text(service.env)}`,
     ].join(' AND ');
   }
 
   /** The attributes any event of the source has. */
   private async attributes(run: Run, minutes: number) {
-    return attributesOf(
-      await run(`SELECT keyset() FROM Log ${where(`${name(SERVICE_ATTRIBUTE)} IS NOT NULL`)} ${since(minutes)}`),
-    );
+    return attributesOf(await run(`SELECT keyset() FROM Log ${since(minutes)}`));
   }
 
   /** The condition that an event's status is one of `codes`, on any of `attributes`; empty when there is none. */
@@ -362,6 +369,16 @@ export class NewRelicLogs implements LogReader {
       const names = Object.values(row).find(Array.isArray) ?? [];
       for (const found of names.flatMap((one) => asText(one) ?? []))
         seen.set(JSON.stringify([found, env]), { name: found, env });
+    }
+    // The envs with a failing event that names no Service: they are the Service `(no service)`.
+    const attribute = name(SERVICE_ATTRIBUTE);
+    const unnamed = await run(
+      `SELECT count(*) FROM Log ${where(failingNow, `(${attribute} IS NULL OR ${attribute} = '')`)} FACET ${name(ENV_ATTRIBUTE)} LIMIT MAX ${since(minutes)}`,
+    );
+    for (const row of unnamed) {
+      if (Number(row.count ?? 0) === 0) continue;
+      const env = envOf(facetValues(row, [ENV_ATTRIBUTE])[0]);
+      seen.set(JSON.stringify([NO_SERVICE, env]), { name: NO_SERVICE, env });
     }
     return [...seen.values()];
   }

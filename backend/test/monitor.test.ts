@@ -4541,7 +4541,7 @@ describe('New Relic logs', () => {
       expect(ctx.daemon.sdk.calls.length).toBe(turns);
     });
 
-    it('reads the Services from the attributes service.name and environment, an event with no env as no env, and says which name it found no Services under', async () => {
+    it('reads the Services from the attributes service.name and environment, an event with no env as no env, and an event with no service.name as (no service)', async () => {
       const { ctx } = await withNewRelic((one) =>
         one.events(failure(5, { environment: undefined }), {
           at: minutesAgo(6),
@@ -4549,14 +4549,79 @@ describe('New Relic logs', () => {
         }),
       );
       expect(await scanNewRelic(ctx, { envs: ['no env'] })).toMatchObject({ status: 'ok' });
-      expect((await ctx.http.get('/services')).body.data).toMatchObject([{ name: 'shop-api', env: 'no env' }]);
+      // The second event names no service.name and no env: it is the Service (no service) in the env no env.
+      expect((await ctx.http.get('/services')).body.data).toMatchObject([
+        { name: '(no service)', env: 'no env' },
+        { name: 'shop-api', env: 'no env' },
+      ]);
+      // An event that names no service.name is the Service (no service), in its env, not a Service of its own name.
       const named = await withNewRelic((one) =>
         one.events({ at: minutesAgo(6), attrs: { ...EVENT, app: 'billing-api', env: 'prod' } }),
       );
       const ended = await scanNewRelic(named.ctx, { envs: ['prod', 'no env'] });
       expect(ended).toMatchObject({ status: 'ok' });
-      expect(ended.notes).toContain('New Relic logs: no Services found under the attribute service.name');
-      expect(await alertList(named.ctx)).toEqual([]);
+      expect((await named.ctx.http.get('/services')).body.data).toMatchObject([
+        { name: '(no service)', env: 'no env' },
+      ]);
+    });
+
+    it('reads a failing event with no service.name as the Service (no service), by level alone or by status, in its own env', async () => {
+      const { ctx, ended } = await scanned(
+        [
+          // The error log of the report: an error level, no status code, no route, and no service attribute.
+          {
+            at: minutesAgo(5),
+            attrs: {
+              environment: 'prod',
+              level: 'error',
+              message: 'test.error_log',
+              'entity.name': 'ecommerce-platform',
+            },
+          },
+          {
+            at: minutesAgo(6),
+            attrs: { environment: 'prod', 'http.response.status_code': 503, message: 'upstream down' },
+          },
+          { at: minutesAgo(7), attrs: { environment: 'staging', level: 'error', message: 'only in staging' } },
+          // Not failing: no status of 400 or more and no error level.
+          { at: minutesAgo(8), attrs: { environment: 'prod', level: 'info', message: 'app.starting' } },
+          failure(9),
+        ],
+        { body: { envs: ['prod'] } },
+      );
+      expect(ended).toMatchObject({ status: 'ok' });
+      expect(ended.notes).not.toContain('New Relic logs: no Services found under the attribute service.name');
+      const services = (await ctx.http.get('/services')).body.data.map((one: { name: string; env: string }) => [
+        one.name,
+        one.env,
+      ]);
+      expect(services).toEqual(
+        expect.arrayContaining([
+          ['(no service)', 'prod'],
+          ['shop-api', 'prod'],
+        ]),
+      );
+      // The staging failure is another env: a Scan of prod leaves it out.
+      expect(services).toHaveLength(2);
+      expect(await logLines(ctx)).toEqual(['NullPointerException in OrderService', 'test.error_log', 'upstream down']);
+      const listed = await ctx.http.get('/monitor/log-services?connector=new_relic_logs&window=24h');
+      expect(listed.body.data.map((one: { name: string }) => one.name)).toContain('(no service)');
+    });
+
+    it('reads (no service) only when it is ticked, and every Service when none is', async () => {
+      const events = [
+        { at: minutesAgo(5), attrs: { environment: 'prod', level: 'error', message: 'unnamed failure' } },
+        failure(6),
+      ];
+      const ticked = await scanned(events, { body: { services: ['shop-api'] } });
+      expect(await logLines(ticked.ctx)).toEqual(['NullPointerException in OrderService']);
+      const only = await scanned(events, { body: { services: ['(no service)'] } });
+      expect(await logLines(only.ctx)).toEqual(['unnamed failure']);
+    });
+
+    it('says an account with no logs in the window has none, instead of naming an attribute', async () => {
+      const { ended } = await scanned([]);
+      expect(ended.notes).toContain('New Relic logs: no logs in this window');
     });
 
     it('reads only the Services of the env the Scan names', async () => {

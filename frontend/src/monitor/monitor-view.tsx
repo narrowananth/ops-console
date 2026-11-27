@@ -7,7 +7,7 @@ import { useAlert, useConnectors, useServices } from '../lib/queries';
 import { useAddress } from '../lib/remember';
 import { AlertDrawer } from './alert-drawer';
 import { AlertsTable } from './alerts-table';
-import { CONNECT_A_SOURCE, connectedSources, downSources, useSourceFilter } from './log-source';
+import { CONNECT_A_SOURCE, connectedSources, downSources, type SourceFilter, useSourceFilter } from './log-source';
 import { useMonitorData } from './monitor-data';
 import { MonitorHeader } from './monitor-header';
 import { useScanScope } from './scan-scope';
@@ -26,7 +26,12 @@ export function MonitorView() {
   const services = useServices();
   const sources = connectedSources(connectors.data?.data ?? []);
   const down = downSources(connectors.data?.data ?? []);
-  const [source, pickSource] = useSourceFilter();
+  const [source, setSource] = useSourceFilter();
+  // The pick belongs to the list in view: another source has Services of its own, so a tab change leaves it behind.
+  const pickSource = (next: SourceFilter) => {
+    setSource(next);
+    if (next !== source && service !== null) setAddress({ service: null, alert: null });
+  };
   const scope = useScanScope();
   const data = useMonitorData(sources, source, scope);
   const [ticked, setTicked] = useTicked();

@@ -435,6 +435,9 @@ export type CreateScan = z.infer<typeof createScanSchema>;
  */
 export const NO_ENV = 'no env';
 
+/** The Service of a failing log that names none, in one env: nothing tells two such logs apart. */
+export const NO_SERVICE = '(no service)';
+
 /** A Service a log source has failing requests for (HTTP status 400 or more) in the range and codes asked about. */
 export const logServiceSchema = z.object({
   name: z.string(),
